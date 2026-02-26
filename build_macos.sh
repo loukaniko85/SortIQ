@@ -9,8 +9,8 @@
 #   brew install create-dmg  (for the .dmg step)
 #   pip install pyinstaller pillow
 #
-# Must be run on macOS (any arch). GitHub Actions uses macos-13 for universal
-# builds because it ships both x86_64 Python and Rosetta for cross-compilation.
+# Must be run on macOS (any arch). PyInstaller 6+ cross-compiles to universal2
+# from either arm64 or x86_64 — GitHub Actions uses macos-14 (Apple Silicon).
 # ─────────────────────────────────────────────────────────────────────────────
 set -e
 

@@ -98,9 +98,9 @@ jobs:
   # ── macOS ───────────────────────────────────────────────────────────────────
   macos:
     name: Build macOS Universal DMG
-    # macos-13 is an Intel runner with Rosetta installed, which is required for
-    # universal2 (arm64 + x86_64) cross-compilation. macos-14 is arm64-only.
-    runs-on: macos-13
+    # macos-14 is Apple Silicon (arm64). PyInstaller 6+ cross-compiles to
+    # universal2 (arm64 + x86_64) from arm64 without needing an Intel runner.
+    runs-on: macos-14
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
