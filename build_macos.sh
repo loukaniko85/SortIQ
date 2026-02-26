@@ -59,9 +59,9 @@ echo "[3/4] Running PyInstaller…"
 # Clean previous build
 rm -rf build/SortIQ dist/SortIQ.app
 
-# --target-arch universal2 builds fat binaries containing both arm64 + x86_64
-# This is the key flag that makes the app run natively on Apple Silicon and Intel
-pyinstaller sortiq.spec --noconfirm --clean --target-arch universal2 2>&1 | tail -8
+# target_arch="universal2" is set inside sortiq.spec — do NOT pass --target-arch
+# on the command line when using a .spec file (PyInstaller rejects it).
+pyinstaller sortiq.spec --noconfirm --clean 2>&1 | tail -8
 
 APP_PATH="dist/SortIQ.app"
 if [ ! -d "${APP_PATH}" ]; then
