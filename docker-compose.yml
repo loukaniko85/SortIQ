@@ -1,0 +1,55 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# SortIQ — docker compose
+#
+# Quick start:
+#   docker compose up --build
+#   GUI: http://localhost:6080/vnc.html?resize=scale&autoconnect=1
+#   API: http://localhost:8060/docs
+#
+# Resolution: set XVFB_RESOLUTION to match your monitor/browser for no black bars
+#   1280x720x24  | 1440x900x24 | 1920x1080x24 | 2560x1440x24
+# ─────────────────────────────────────────────────────────────────────────────
+version: "3.9"
+
+services:
+  sortiq:
+    build: .
+    image: sortiq:latest
+    container_name: sortiq
+    ports:
+      - "6080:6080"   # noVNC — open with ?resize=scale&autoconnect=1
+      - "8060:8060"   # FastAPI REST + Swagger UI
+    environment:
+      # ── API keys (or set them in the GUI Settings dialog) ──────────────────
+      - TMDB_API_KEY=${TMDB_API_KEY:-}
+      - TVDB_API_KEY=${TVDB_API_KEY:-}
+      - OPENSUBTITLES_API_KEY=${OPENSUBTITLES_API_KEY:-}
+      # ── Display resolution — change to match your screen ──────────────────
+      # Options: 1280x720x24 | 1440x900x24 | 1920x1080x24 | 2560x1440x24
+      - XVFB_RESOLUTION=${XVFB_RESOLUTION:-1440x900x24}
+      # ── API server ─────────────────────────────────────────────────────────
+      - API_PORT=8060
+      - API_HOST=0.0.0.0
+      # ── Flag used by the GUI to show API status and batch jobs panel ───────
+      - RUNNING_IN_DOCKER=1
+    volumes:
+      # Persist settings, history, presets
+      - ${HOME}/.sortiq:/root/.sortiq
+      # Your media files — change left side to your actual path
+      - ${MEDIA_DIR:-~/Media}:/media
+    restart: "no"
+    shm_size: "256mb"
+
+  # ── Headless API-only (uncomment to run without GUI) ─────────────────────
+  # sortiq-api:
+  #   build: .
+  #   image: sortiq:latest
+  #   command: ["api"]
+  #   ports:
+  #     - "8060:8060"
+  #   environment:
+  #     - TMDB_API_KEY=${TMDB_API_KEY:-}
+  #     - RUNNING_IN_DOCKER=1
+  #   volumes:
+  #     - ${HOME}/.sortiq:/root/.sortiq
+  #     - ${MEDIA_DIR:-~/Media}:/media

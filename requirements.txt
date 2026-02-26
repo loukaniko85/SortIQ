@@ -1,0 +1,14 @@
+# GUI
+PyQt6>=6.6.0
+
+# HTTP / networking
+requests>=2.31.0
+
+# Media metadata
+pymediainfo>=5.1.0
+mutagen>=1.47.0
+
+# FastAPI backend
+fastapi>=0.111.0
+uvicorn[standard]>=0.30.0
+pydantic>=2.7.0
