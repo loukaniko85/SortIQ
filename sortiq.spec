@@ -1,14 +1,19 @@
 # -*- mode: python ; coding: utf-8 -*-
-# PyInstaller spec file — works for Windows (.exe) and macOS (.app)
+# PyInstaller 6.x spec — works for Windows (.exe) and macOS (.app)
 # Run:  pyinstaller sortiq.spec
+#
+# PyInstaller 6.x API changes from 5.x:
+#   - PYZ: removed a.zlib_data and cipher= arguments
+#   - Analysis: removed cipher=, win_no_prefer_redirects=, win_private_assemblies=
+#   - COLLECT: removed a.zipfiles (merged into a.datas)
+#   - EXE: cipher= removed
+#   - UPX must be disabled for universal2 macOS builds
 
 import sys
-import os
 from pathlib import Path
-from PyInstaller.utils.hooks import collect_data_files, collect_dynamic_libs
+from PyInstaller.utils.hooks import collect_data_files
 
-block_cipher = None
-IS_MACOS  = sys.platform == "darwin"
+IS_MACOS   = sys.platform == "darwin"
 IS_WINDOWS = sys.platform == "win32"
 
 # ── Data files ────────────────────────────────────────────────────────────────
@@ -19,11 +24,13 @@ assets_dir = Path("assets")
 if assets_dir.exists():
     for png in assets_dir.glob("*.png"):
         datas.append((str(png), "assets"))
+    if Path("assets/sortiq.icns").exists():
+        datas.append(("assets/sortiq.icns", "assets"))
 
-# Core Python modules (relative imports won't work in frozen bundle)
+# Core Python modules
 datas += [("core", "core"), ("api", "api")]
 
-# Collect PyQt6 Qt platform plugins etc.
+# PyQt6 Qt plugins and data files
 datas += collect_data_files("PyQt6")
 
 # ── Hidden imports ────────────────────────────────────────────────────────────
@@ -58,9 +65,9 @@ hiddenimports = [
 ]
 
 # ── Analysis ──────────────────────────────────────────────────────────────────
-# Universal macOS build: compile for both x86_64 and arm64 in one .app
-# PyInstaller handles this via target_arch="universal2" on macOS
-_macos_target = "universal2" if IS_MACOS else None
+# target_arch="universal2" makes a fat binary with both arm64 and x86_64 slices.
+# On Windows/Linux target_arch=None means native arch.
+_target_arch = "universal2" if IS_MACOS else None
 
 a = Analysis(
     ["main.py"],
@@ -72,35 +79,37 @@ a = Analysis(
     hooksconfig={},
     runtime_hooks=[],
     excludes=["tkinter", "test", "unittest"],
-    win_no_prefer_redirects=False,
-    win_private_assemblies=False,
-    cipher=block_cipher,
     noarchive=False,
-    target_arch=_macos_target,
+    target_arch=_target_arch,
 )
 
-pyz = PYZ(a.pure, a.zlib_data, cipher=block_cipher)
+# PyInstaller 6.x: PYZ takes only a.pure — a.zlib_data and cipher= are gone
+pyz = PYZ(a.pure)
 
 # ── macOS .app bundle ─────────────────────────────────────────────────────────
 if IS_MACOS:
     icon_file = "assets/sortiq.icns" if Path("assets/sortiq.icns").exists() else None
     exe = EXE(
-        pyz, a.scripts, [],
+        pyz,
+        a.scripts,
+        [],
         exclude_binaries=True,
         name="SortIQ",
         debug=False,
         bootloader_ignore_signals=False,
         strip=False,
-        upx=False,        # UPX breaks universal2 binaries — must be disabled
+        upx=False,          # UPX corrupts universal2 fat binaries
         console=False,
         icon=icon_file,
         target_arch="universal2",
     )
+    # PyInstaller 6.x: COLLECT no longer takes a.zipfiles
     coll = COLLECT(
         exe,
-        a.binaries, a.zipfiles, a.datas,
+        a.binaries,
+        a.datas,
         strip=False,
-        upx=False,        # UPX breaks universal2
+        upx=False,
         upx_exclude=[],
         name="SortIQ",
     )
@@ -114,7 +123,7 @@ if IS_MACOS:
             "NSHighResolutionCapable": True,
             "NSRequiresAquaSystemAppearance": False,
             "NSAppleEventsUsageDescription": "SortIQ uses Apple Events for file operations.",
-            "LSMinimumSystemVersion": "11.0",   # Big Sur — minimum that supports Apple Silicon
+            "LSMinimumSystemVersion": "11.0",
             "LSArchitecturePriority": ["arm64", "x86_64"],
             "CFBundleShortVersionString": "1.2",
             "CFBundleVersion": "1.2.0",
@@ -128,20 +137,22 @@ if IS_MACOS:
 elif IS_WINDOWS:
     icon_file = "assets\\sortiq.ico" if Path("assets/sortiq.ico").exists() else None
     exe = EXE(
-        pyz, a.scripts, [],
+        pyz,
+        a.scripts,
+        [],
         exclude_binaries=True,
         name="SortIQ",
         debug=False,
         bootloader_ignore_signals=False,
         strip=False,
         upx=True,
-        console=False,       # no console window
+        console=False,
         icon=icon_file,
-        version_file=None,
     )
     coll = COLLECT(
         exe,
-        a.binaries, a.zipfiles, a.datas,
+        a.binaries,
+        a.datas,
         strip=False,
         upx=True,
         upx_exclude=["vcruntime140.dll", "python*.dll", "Qt*.dll"],
@@ -151,7 +162,9 @@ elif IS_WINDOWS:
 # ── Linux (fallback — normally use AppImage) ──────────────────────────────────
 else:
     exe = EXE(
-        pyz, a.scripts, [],
+        pyz,
+        a.scripts,
+        [],
         exclude_binaries=True,
         name="SortIQ",
         debug=False,
@@ -161,7 +174,9 @@ else:
     )
     coll = COLLECT(
         exe,
-        a.binaries, a.zipfiles, a.datas,
-        strip=False, upx=True,
+        a.binaries,
+        a.datas,
+        strip=False,
+        upx=True,
         name="SortIQ",
     )

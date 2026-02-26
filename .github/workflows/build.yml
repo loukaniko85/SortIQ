@@ -199,7 +199,6 @@ jobs:
             -e LIBGL_ALWAYS_SOFTWARE=1 \
             -e DBUS_SESSION_BUS_ADDRESS="unix:path=/dev/null/nosuchsocket" \
             -e NO_AT_BRIDGE=1 \
-            --timeout 60 \
             sortiq:ci-test \
             python3 -c "
           import sys
