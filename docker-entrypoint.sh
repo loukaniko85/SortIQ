@@ -131,7 +131,6 @@ export DBUS_SESSION_BUS_ADDRESS="unix:path=/dev/null/nosuchsocket"
 export QT_NO_GLIB=1
 export NO_AT_BRIDGE=1
 export GTK_USE_PORTAL=0
-export XDG_CURRENT_DESKTOP=
 export GIO_USE_VFS=local
 export GVFS_DISABLE_FUSE=1
 

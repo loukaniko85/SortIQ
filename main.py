@@ -499,7 +499,7 @@ class SettingsDialog(QDialog):
         app_name.setAlignment(Qt.AlignmentFlag.AlignCenter)
         av.addWidget(app_name)
 
-        version_lbl = QLabel("v1.1  —  The open-source FileBot alternative")
+        version_lbl = QLabel("v1.2  —  The open-source FileBot alternative")
         version_lbl.setStyleSheet("color: #6B7280; font-size: 13px; border: none;")
         version_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         av.addWidget(version_lbl)

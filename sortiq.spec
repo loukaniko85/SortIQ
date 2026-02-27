@@ -65,9 +65,9 @@ hiddenimports = [
 ]
 
 # ── Analysis ──────────────────────────────────────────────────────────────────
-# target_arch="universal2" makes a fat binary with both arm64 and x86_64 slices.
-# On Windows/Linux target_arch=None means native arch.
-_target_arch = "universal2" if IS_MACOS else None
+# universal2 (fat arm64+x86_64) is NOT used: pydantic_core and several other
+# deps only ship single-arch arm64 wheels, so PyInstaller cannot merge them.
+# The app builds arm64-native; Rosetta 2 runs it transparently on Intel Macs.
 
 a = Analysis(
     ["main.py"],
@@ -80,7 +80,6 @@ a = Analysis(
     runtime_hooks=[],
     excludes=["tkinter", "test", "unittest"],
     noarchive=False,
-    target_arch=_target_arch,
 )
 
 # PyInstaller 6.x: PYZ takes only a.pure — a.zlib_data and cipher= are gone
@@ -98,10 +97,9 @@ if IS_MACOS:
         debug=False,
         bootloader_ignore_signals=False,
         strip=False,
-        upx=False,          # UPX corrupts universal2 fat binaries
+        upx=True,
         console=False,
         icon=icon_file,
-        target_arch="universal2",
     )
     # PyInstaller 6.x: COLLECT no longer takes a.zipfiles
     coll = COLLECT(
@@ -109,7 +107,7 @@ if IS_MACOS:
         a.binaries,
         a.datas,
         strip=False,
-        upx=False,
+        upx=True,
         upx_exclude=[],
         name="SortIQ",
     )
@@ -122,14 +120,11 @@ if IS_MACOS:
         info_plist={
             "NSHighResolutionCapable": True,
             "NSRequiresAquaSystemAppearance": False,
-            "NSAppleEventsUsageDescription": "SortIQ uses Apple Events for file operations.",
             "LSMinimumSystemVersion": "11.0",
-            "LSArchitecturePriority": ["arm64", "x86_64"],
             "CFBundleShortVersionString": "1.2",
             "CFBundleVersion": "1.2.0",
             "NSPrincipalClass": "NSApplication",
             "NSAppleScriptEnabled": False,
-            "NSSupportsAutomaticTermination": False,
         },
     )
 

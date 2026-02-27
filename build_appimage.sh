@@ -200,16 +200,16 @@ _SITE="\${APPDIR}/opt/python${PYTHON_VERSION}/lib/python${PYTHON_VERSION}/site-p
 export QT_QPA_PLATFORMTHEME=
 export APPIMAGE="\${APPIMAGE:-appimage}"
 
-# Disable ALL D-Bus / portal integration.
-# Empty DBUS_SESSION_BUS_ADDRESS causes Qt to hang waiting for a socket —
-# set it to a syntactically valid but unreachable address instead.
-# GTK_USE_PORTAL=0 and XDG_CURRENT_DESKTOP= stop QFileDialog from trying
-# the portal path, which is what causes the "not responding" freeze.
+# Disable D-Bus portal for file dialogs.
+# Setting DBUS_SESSION_BUS_ADDRESS to an unreachable path causes Qt to fail
+# fast rather than hanging trying to connect to the portal.
+# GTK_USE_PORTAL=0 stops QFileDialog using the portal path.
+# Do NOT clear XDG_CURRENT_DESKTOP — it breaks window manager decorations
+# (minimize/maximize/close buttons disappear).
 export DBUS_SESSION_BUS_ADDRESS="unix:path=/dev/null/nosuchsocket"
 export QT_NO_GLIB=1
 export NO_AT_BRIDGE=1
 export GTK_USE_PORTAL=0
-export XDG_CURRENT_DESKTOP=
 export GIO_USE_VFS=local
 export GVFS_DISABLE_FUSE=1
 

@@ -1,16 +1,17 @@
 #!/bin/bash
 # ─────────────────────────────────────────────────────────────────────────────
-# SortIQ macOS Universal build
+# SortIQ macOS build — arm64 native (Apple Silicon)
 #
-# Produces:  SortIQ-1.2-macOS-universal.dmg
-# Runs natively on:  Apple Silicon (arm64) AND Intel (x86_64)
+# Produces:  SortIQ-1.2-macOS.dmg
+# Runs on:   Apple Silicon natively; Intel Macs via Rosetta 2 (automatic)
+#
+# Note: universal2 (fat arm64+x86_64) is not used because pydantic_core and
+# several other pip wheels only ship single-arch arm64 binaries.
+# Rosetta 2 on Intel Macs handles arm64 apps transparently at near-native speed.
 #
 # Requirements:
 #   brew install create-dmg  (for the .dmg step)
 #   pip install pyinstaller pillow
-#
-# Must be run on macOS (any arch). PyInstaller 6+ cross-compiles to universal2
-# from either arm64 or x86_64 — GitHub Actions uses macos-14 (Apple Silicon).
 # ─────────────────────────────────────────────────────────────────────────────
 set -e
 
@@ -19,16 +20,15 @@ APP_VERSION="1.2"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "${SCRIPT_DIR}"
 
-# Detect host arch for diagnostics
 HOST_ARCH=$(uname -m)
 echo "═══════════════════════════════════════════════════════════"
-echo "  Building ${APP_NAME} ${APP_VERSION} for macOS (Universal)"
-echo "  Host: ${HOST_ARCH} — output: universal2 (arm64 + x86_64)"
+echo "  Building ${APP_NAME} ${APP_VERSION} for macOS"
+echo "  Host: ${HOST_ARCH} — native arm64 (Intel via Rosetta 2)"
 echo "═══════════════════════════════════════════════════════════"
 
 # ── 1. Install/verify dependencies ───────────────────────────────────────────
 echo "[1/4] Installing Python dependencies…"
-# PyInstaller 6.x+ has solid universal2 support
+# PyInstaller 6.x+ required for Python 3.11 support
 pip install --upgrade "pyinstaller>=6.0" pillow --quiet
 
 # ── 2. Generate .icns from PNG ────────────────────────────────────────────────
@@ -70,16 +70,11 @@ if [ ! -d "${APP_PATH}" ]; then
 fi
 echo "  ✓ ${APP_PATH} built ($(du -sh "${APP_PATH}" | cut -f1))"
 
-# Verify universal binary
+# Show architecture (informational)
 MAIN_BIN="${APP_PATH}/Contents/MacOS/SortIQ"
 if [ -f "${MAIN_BIN}" ]; then
     ARCHS=$(lipo -archs "${MAIN_BIN}" 2>/dev/null || echo "unknown")
     echo "  Architecture: ${ARCHS}"
-    if echo "${ARCHS}" | grep -q "arm64" && echo "${ARCHS}" | grep -q "x86_64"; then
-        echo "  ✓ Universal binary confirmed (arm64 + x86_64)"
-    else
-        echo "  ⚠ Expected universal2 — got: ${ARCHS}"
-    fi
 fi
 
 # Code sign (skipped in CI without developer cert — creates ad-hoc signed app)
@@ -90,7 +85,7 @@ fi
 
 # ── 4. Create .dmg ────────────────────────────────────────────────────────────
 echo "[4/4] Creating .dmg…"
-OUTPUT="${SCRIPT_DIR}/${APP_NAME}-${APP_VERSION}-macOS-universal.dmg"
+OUTPUT="${SCRIPT_DIR}/${APP_NAME}-${APP_VERSION}-macOS.dmg"
 rm -f "${OUTPUT}"
 
 if command -v create-dmg &>/dev/null; then
