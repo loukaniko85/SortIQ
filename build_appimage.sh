@@ -197,7 +197,6 @@ export PATH="\${APPDIR}/opt/python${PYTHON_VERSION}/bin:\${APPDIR}/usr/bin:\${PA
 
 _SITE="\${APPDIR}/opt/python${PYTHON_VERSION}/lib/python${PYTHON_VERSION}/site-packages"
 [ -d "\${_SITE}/PyQt6/Qt6/plugins" ] && export QT_PLUGIN_PATH="\${_SITE}/PyQt6/Qt6/plugins"
-export QT_QPA_PLATFORMTHEME=
 export APPIMAGE="\${APPIMAGE:-appimage}"
 
 # Disable D-Bus portal for file dialogs.

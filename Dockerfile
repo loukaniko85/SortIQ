@@ -98,13 +98,13 @@ ENV QT_X11_NO_MITSHM=1
 ENV LIBGL_ALWAYS_SOFTWARE=1
 ENV NO_AT_BRIDGE=1
 
-# Optional: pass API keys via environment instead of the in-app Settings dialog
-ENV TMDB_API_KEY=""
+# API keys are NOT set here — pass them at runtime via docker run -e or compose.
+# Setting secret values in ENV/ARG triggers Docker's secret scanner and is
+# a security anti-pattern. Keys are stored in ~/.sortiq/settings.json instead.
+# Example:  docker run -e TMDB_API_KEY=your_key ...
 ENV API_PORT=8060
 ENV API_HOST=0.0.0.0
 ENV RUNNING_IN_DOCKER=1
-ENV TVDB_API_KEY=""
-ENV OPENSUBTITLES_API_KEY=""
 
 # ── Volumes ───────────────────────────────────────────────────────────────────
 VOLUME ["/root/.sortiq"]

@@ -141,6 +141,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   # ── Docker ─────────────────────────────────────────────────────────────────
+  # ── Docker ─────────────────────────────────────────────────────────────────
   docker:
     name: Build and push Docker image
     runs-on: ubuntu-latest
@@ -175,8 +176,8 @@ jobs:
             type=sha,prefix=
             type=raw,value=latest,enable={{is_default_branch}}
 
-      # Build locally first so we can smoke-test before pushing
-      - name: Build Docker image (local)
+      # Build image locally for smoke-testing (not pushed yet)
+      - name: Build Docker image (local smoke-test)
         uses: docker/build-push-action@v5
         with:
           context: .
@@ -186,10 +187,9 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      # Verify PyQt6 and all core modules import without errors.
-      # --entrypoint python3 overrides /entrypoint.sh so we run Python directly
-      # instead of starting the full Xvfb/VNC/GUI stack.
-      # Shell-level timeout 60 kills the container if anything blocks.
+      # --entrypoint python3 overrides /entrypoint.sh to run Python directly
+      # (without it, passing python3 as an arg starts the full GUI stack).
+      # Shell timeout 60 kills the container if any import blocks on DBus.
       - name: Smoke test — PyQt6 + core modules
         run: |
           timeout 60 docker run --rm \
@@ -212,7 +212,9 @@ jobs:
           print('All core modules OK')
           "
 
-      # Push the final image (only on non-PR events)
+      # Push to GHCR after smoke test passes.
+      # If this fails with permission_denied, enable write access in your repo:
+      # Settings → Actions → General → Workflow permissions → Read and write permissions
       - name: Build and push Docker image
         uses: docker/build-push-action@v5
         with:
