@@ -8,6 +8,12 @@ on:
     types: [published]
   workflow_dispatch:
 
+# Top-level permissions ensure the GITHUB_TOKEN is minted with packages:write
+# so GHCR accepts the push. Job-level overrides alone are not always sufficient.
+permissions:
+  contents: read
+  packages: write
+
 env:
   REGISTRY: ghcr.io
 
