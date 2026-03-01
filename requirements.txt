@@ -4,7 +4,7 @@ PyQt6>=6.6.0
 # HTTP / networking
 requests>=2.31.0
 
-# Media metadata
+# Media metadata extraction
 pymediainfo>=5.1.0
 mutagen>=1.47.0
 
