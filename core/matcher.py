@@ -102,6 +102,9 @@ class MediaMatcher:
             match_result = self._match_tmdb(info)
         elif data_source == "TheTVDB":
             match_result = self._match_tvdb(info)
+        elif data_source == "AniDB":
+            # AniDB native API not yet integrated — TMDB has excellent anime coverage
+            match_result = self._match_tmdb(info)
         else:
             raise ValueError(f"Unknown data source: {data_source}")
 

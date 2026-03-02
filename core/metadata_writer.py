@@ -57,30 +57,30 @@ class MetadataWriter:
         try:
             video = MP4(file_path)
             
-            # Title
+            # Title — mutagen MP4 tags require list values
             if match_info.get('title'):
-                video['\xa9nam'] = match_info['title']
-            
-            # Year
+                video['\xa9nam'] = [str(match_info['title'])]
+
+            # Year — must be a list of strings (ISO date or year string)
             if match_info.get('year'):
-                video['\xa9day'] = match_info['year']
-            
+                video['\xa9day'] = [str(match_info['year'])]
+
             # Description/Plot
             if match_info.get('overview'):
-                video['\xa9des'] = match_info['overview']
-            
+                video['\xa9des'] = [str(match_info['overview'])]
+
             # Genre
             if match_info.get('genres'):
-                video['\xa9gen'] = match_info['genres']
-            
+                video['\xa9gen'] = [str(match_info['genres'])]
+
             # TV Show specific
             if match_info.get('type') == 'tv':
-                if match_info.get('season'):
-                    video['tvsn'] = [match_info['season']]
-                if match_info.get('episode'):
-                    video['tves'] = [match_info['episode']]
+                if match_info.get('season') is not None:
+                    video['tvsn'] = [int(match_info['season'])]
+                if match_info.get('episode') is not None:
+                    video['tves'] = [int(match_info['episode'])]
                 if match_info.get('episode_title'):
-                    video['\xa9nam'] = f"{match_info.get('title', '')} - {match_info['episode_title']}"
+                    video['\xa9nam'] = [f"{match_info.get('title', '')} - {match_info['episode_title']}"]
             
             # Add poster/cover art
             if poster_path and os.path.exists(poster_path):

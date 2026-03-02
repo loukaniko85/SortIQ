@@ -116,18 +116,12 @@ class MediaInfoExtractor:
                             info['ac'] = codec
                             info['audio_codec'] = codec
                     
-                    # Audio channels
+                    # Audio channels — pymediainfo may return int or str; normalise first
                     if track.channel_s:
-                        channels = track.channel_s
-                        if channels == '2':
-                            info['channels'] = '2.0'
-                        elif channels == '6':
-                            info['channels'] = '5.1'
-                        elif channels == '8':
-                            info['channels'] = '7.1'
-                        else:
-                            info['channels'] = channels
-                    
+                        channels = str(track.channel_s).strip()
+                        channel_map = {'2': '2.0', '6': '5.1', '8': '7.1'}
+                        info['channels'] = channel_map.get(channels, channels)
+
                     # Audio bitrate
                     if track.bit_rate:
                         bitrate = int(track.bit_rate) // 1000  # Convert to kbps

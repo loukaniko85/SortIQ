@@ -247,10 +247,17 @@ class MatchWorker(QThread):
         self.naming_scheme = naming_scheme; self.matcher = matcher; self.renamer = renamer
         self.hint_names = hint_names  # optional cleaned filenames for matching (parallel to files)
         self._hard_error_fired = False
+        self._should_stop = False
+
+    def stop(self):
+        """Request the worker to stop at the next opportunity."""
+        self._should_stop = True
 
     def run(self):
         total = len(self.files); matched_count = 0
         for i, fp in enumerate(self.files):
+            if self._should_stop:
+                break
             try:
                 # If hint_names provided (scene clean mode), use a fake path for matching
                 match_path = fp
@@ -277,6 +284,57 @@ class MatchWorker(QThread):
                     self.hard_error.emit(err)
             self.progress.emit(int((i+1)/total*100))
         self.finished.emit(matched_count, total)
+
+
+class FolderScanWorker(QThread):
+    """Background worker to scan a folder for media files without blocking the UI."""
+    files_found = pyqtSignal(list)
+    status      = pyqtSignal(str)
+
+    MEDIA_EXTS = frozenset({'.mp4', '.mkv', '.avi', '.mov', '.m4v', '.mpg', '.mpeg', '.flv', '.wmv'})
+
+    def __init__(self, paths):
+        super().__init__()
+        self.paths = paths  # list of file or folder paths
+
+    def run(self):
+        found = []
+        for path in self.paths:
+            if os.path.isdir(path):
+                self.status.emit(f"\u27f3  Scanning {os.path.basename(path)}\u2026")
+                for p in sorted(Path(path).rglob("*")):
+                    if p.suffix.lower() in self.MEDIA_EXTS and p.is_file():
+                        found.append(str(p))
+            elif os.path.isfile(path):
+                if Path(path).suffix.lower() in self.MEDIA_EXTS:
+                    found.append(path)
+        self.files_found.emit(found)
+
+
+class SubtitleWorker(QThread):
+    """Background worker for subtitle fetching."""
+    status   = pyqtSignal(str)
+    finished = pyqtSignal(int, int)  # (fetched, total)
+
+    def __init__(self, files):
+        super().__init__()
+        self.files = files
+
+    def run(self):
+        fetcher = SubtitleFetcher()
+        fetched = 0
+        total   = len(self.files)
+        for fp in self.files:
+            try:
+                sub = fetcher.fetch_subtitle(fp)
+                if sub:
+                    fetched += 1
+                    self.status.emit(f"\u2b07  {os.path.basename(sub)}")
+                else:
+                    self.status.emit(f"\u2717  No subtitle: {os.path.basename(fp)}")
+            except Exception as e:
+                self.status.emit(f"\u26a0  {os.path.basename(fp)}: {e}")
+        self.finished.emit(fetched, total)
 
 
 class RenameWorker(QThread):
@@ -375,9 +433,15 @@ class RenameWorker(QThread):
                         nfo = nfo_wr.write(str(fp), mi, str(dest))
                         if nfo:
                             self.status.emit(f"   \U0001f4c4  NFO: {os.path.basename(nfo)}")
-                        # Write tvshow.nfo in show root if it's a TV episode
+                        # Write tvshow.nfo in show root if it's a TV episode.
+                        # Hierarchical scheme (Show/Season XX/file.mkv) → go up 2 levels.
+                        # Flat scheme (outdir/file.mkv) → go up 1 level.
                         if mi.get("type") == "tv":
-                            show_dir = dest.parent.parent
+                            parent_name = dest.parent.name.lower()
+                            if parent_name.startswith("season") or parent_name.startswith("s0"):
+                                show_dir = dest.parent.parent
+                            else:
+                                show_dir = dest.parent
                             tvshow_nfo = show_dir / "tvshow.nfo"
                             if not tvshow_nfo.exists():
                                 nfo_wr.write_tvshow(str(show_dir), mi)
@@ -411,7 +475,6 @@ class SettingsDialog(QDialog):
         self._build(); self._load()
 
     def _build(self):
-        from PyQt6.QtWidgets import QTabWidget
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0); outer.setSpacing(0)
 
@@ -665,9 +728,10 @@ class JobPollerThread(QThread):
 
     def run(self):
         import time as _time
+        import urllib.request
+        import json as _json
         while self._running:
             try:
-                import urllib.request, json as _json
                 with urllib.request.urlopen(f"{self._api_base}/jobs", timeout=3) as r:
                     self.jobs_updated.emit(_json.loads(r.read()))
             except Exception as e:
@@ -694,7 +758,9 @@ class BatchJobsDialog(QDialog):
 
     def closeEvent(self, e):
         if self._poller:
-            self._poller.stop(); self._poller.quit()
+            self._poller.stop()
+            self._poller.quit()
+            self._poller.wait(2000)  # Wait up to 2 s to prevent use-after-free
         super().closeEvent(e)
 
     # ── Build UI ──────────────────────────────────────────────────────────────
@@ -837,7 +903,7 @@ class BatchJobsDialog(QDialog):
         self._cancel_btn = QPushButton("\u2715  Cancel Job"); self._cancel_btn.setObjectName("danger")
         self._cancel_btn.setFixedHeight(32); self._cancel_btn.setEnabled(False)
         self._cancel_btn.clicked.connect(self._cancel_job)
-        self._delete_btn = QPushButton("\u1f5d1  Delete Record"); self._delete_btn.setObjectName("ghost")
+        self._delete_btn = QPushButton("\U0001f5d1  Delete Record"); self._delete_btn.setObjectName("ghost")
         self._delete_btn.setFixedHeight(32); self._delete_btn.setEnabled(False)
         self._delete_btn.clicked.connect(self._delete_job)
         cancel_row.addWidget(self._cancel_btn); cancel_row.addWidget(self._delete_btn); cancel_row.addStretch()
@@ -1191,7 +1257,10 @@ class SonarrRadarrWorker(QThread):
         r = requests.get(f"{base_url}{path}", headers=self._headers(key),
                          params=params or {}, timeout=10)
         r.raise_for_status()
-        return r.json()
+        try:
+            return r.json()
+        except ValueError as exc:
+            raise ValueError(f"Invalid JSON response from {path}: {exc}") from exc
 
     def run(self):
         import requests
@@ -2050,7 +2119,13 @@ class WatchFolderDialog(QDialog):
         self._watcher = QFileSystemWatcher(self)
         self._watcher.directoryChanged.connect(self._on_dir_changed)
         self._watched_dir = ""
+        self._known_files: set = set()  # track files already emitted to avoid duplicates
         self._build()
+
+    def closeEvent(self, e):
+        if self._watched_dir:
+            self._watcher.removePath(self._watched_dir)
+        super().closeEvent(e)
 
     def _build(self):
         v = QVBoxLayout(self)
@@ -2111,6 +2186,7 @@ class WatchFolderDialog(QDialog):
         if self._watched_dir:
             self._watcher.removePath(self._watched_dir)
             self._watched_dir = ""
+            self._known_files.clear()
             self._toggle_btn.setText("▶  Start Watching")
             self._status_lbl.setText("Not watching.")
             self._status_lbl.setStyleSheet("color: #888; font-size: 11px;")
@@ -2120,11 +2196,17 @@ class WatchFolderDialog(QDialog):
                 QMessageBox.warning(self, "No Folder", "Please choose a valid folder first.")
                 return
             self._watched_dir = d
+            # Snapshot existing files so we only emit *new* ones later
+            VIDEO_EXT = {".mp4", ".mkv", ".avi", ".mov", ".m4v", ".wmv", ".flv", ".webm"}
+            self._known_files = {
+                os.path.join(d, f) for f in os.listdir(d)
+                if os.path.isfile(os.path.join(d, f)) and Path(f).suffix.lower() in VIDEO_EXT
+            }
             self._watcher.addPath(d)
             self._toggle_btn.setText("⏹  Stop Watching")
             self._status_lbl.setText(f"Watching: {d}")
             self._status_lbl.setStyleSheet("color: #4caf50; font-size: 11px; font-weight: bold;")
-            self._log.append(f"▶ Started watching: {d}")
+            self._log.append(f"▶ Started watching: {d} ({len(self._known_files)} existing file(s) ignored)")
 
     def _on_dir_changed(self, path):
         VIDEO_EXT = {".mp4", ".mkv", ".avi", ".mov", ".m4v", ".wmv", ".flv", ".webm"}
@@ -2133,8 +2215,9 @@ class WatchFolderDialog(QDialog):
             for f in os.listdir(path):
                 if Path(f).suffix.lower() in VIDEO_EXT:
                     fp = os.path.join(path, f)
-                    if os.path.isfile(fp):
+                    if os.path.isfile(fp) and fp not in self._known_files:
                         new_files.append(fp)
+                        self._known_files.add(fp)
         except OSError:
             return
         if new_files:
@@ -2146,6 +2229,16 @@ class WatchFolderDialog(QDialog):
 class SortIQApp(QMainWindow):
     def __init__(self):
         super().__init__()
+        # Explicitly set window flags so decorations (minimize/maximise/close)
+        # are always present — critical for AppImage on X11 and Wayland.
+        self.setWindowFlags(
+            Qt.WindowType.Window |
+            Qt.WindowType.WindowTitleHint |
+            Qt.WindowType.WindowSystemMenuHint |
+            Qt.WindowType.WindowMinimizeButtonHint |
+            Qt.WindowType.WindowMaximizeButtonHint |
+            Qt.WindowType.WindowCloseButtonHint
+        )
         self.setWindowTitle("SortIQ")
         self.setWindowIcon(_app_icon())
         self.setMinimumSize(960, 660); self.resize(1380, 840)
@@ -2302,8 +2395,8 @@ class SortIQApp(QMainWindow):
         self.drop_zone  = DropZone()
         self.drop_zone.files_dropped.connect(self.add_files_list)
         self.original_list = QListWidget()
-        self.original_list.setAcceptDrops(True)
-        self.original_list.setDragDropMode(QAbstractItemView.DragDropMode.DropOnly)
+        self.original_list.setAcceptDrops(False)  # Let main window handle external drops
+        self.original_list.setDragDropMode(QAbstractItemView.DragDropMode.NoDragDrop)
         self.original_list.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.original_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.original_list.customContextMenuRequested.connect(self._file_context_menu)
@@ -2548,11 +2641,16 @@ class SortIQApp(QMainWindow):
         if not ok: return
 
         chosen = results[choices.index(choice)]
+        try:
+            new_name = self.renamer.generate_new_name(fp, chosen, self.naming_scheme_input.text())
+        except Exception as exc:
+            QMessageBox.critical(self, "Name Error", f"Could not generate filename:\n{exc}")
+            return
         self.matches[idx] = chosen
-        new_name = self.renamer.generate_new_name(fp, chosen, self.naming_scheme_input.text())
         item = self.new_names_list.item(idx)
-        item.setText(new_name)
-        item.setForeground(QColor(C_SUCCESS))
+        if item:
+            item.setText(new_name)
+            item.setForeground(QColor(C_SUCCESS))
         self._log(f"\u270f  Manual match: {os.path.basename(fp)} \u2192 {chosen['title']}")
         matched = sum(1 for m in self.matches if m)
         self.rename_btn.setEnabled(matched > 0)
@@ -2574,26 +2672,51 @@ class SortIQApp(QMainWindow):
         if files: self.add_files_list(files)
 
     def add_folder(self):
-        folder = QFileDialog.getExistingDirectory(self,"Select Folder")
+        folder = QFileDialog.getExistingDirectory(self, "Select Folder")
         if not folder: return
-        exts = {'.mp4','.mkv','.avi','.mov','.m4v','.mpg','.mpeg','.flv','.wmv'}
-        found = [str(p) for p in Path(folder).rglob("*") if p.suffix.lower() in exts]
-        if found: self.add_files_list(sorted(found))
-        else: self._log("\u26a0  No media files found in selected folder.")
+        self._log(f"\u27f3  Scanning folder: {os.path.basename(folder)}\u2026")
+        self._scan_worker = FolderScanWorker([folder])
+        self._scan_worker.files_found.connect(self._on_folder_scan_done)
+        self._scan_worker.status.connect(self._log)
+        self._scan_worker.start()
+
+    def _on_folder_scan_done(self, found):
+        if found:
+            self.add_files_list(found)
+        else:
+            self._log("\u26a0  No media files found in selected folder.")
 
     def add_files_list(self, paths):
+        # Split into files and dirs — dirs get scanned in a background thread
+        dirs  = [p for p in paths if os.path.isdir(p)]
+        files = [p for p in paths if not os.path.isdir(p)]
+
+        # Add plain files immediately (fast, no I/O)
+        if files:
+            self._add_resolved_files(files)
+
+        # Scan any dropped/added directories in background
+        if dirs:
+            self._log(f"\u27f3  Scanning {len(dirs)} folder(s)\u2026")
+            self._scan_worker = FolderScanWorker(dirs)
+            self._scan_worker.files_found.connect(self._add_resolved_files)
+            self._scan_worker.status.connect(self._log)
+            self._scan_worker.start()
+
+    def _add_resolved_files(self, paths):
+        """Add a flat list of file paths (no dirs) to the file list. Deduplicates."""
         added = 0
+        existing = set(self.files)
         for path in paths:
-            if os.path.isdir(path):
-                exts = {'.mp4','.mkv','.avi','.mov','.m4v','.mpg','.mpeg','.flv','.wmv'}
-                for p in sorted(Path(path).rglob("*")):
-                    if p.suffix.lower() in exts and str(p) not in self.files:
-                        self.files.append(str(p)); self._add_file_item(str(p)); added+=1
-            elif path not in self.files:
-                self.files.append(path); self._add_file_item(path); added+=1
+            if path not in existing:
+                existing.add(path)
+                self.files.append(path)
+                self._add_file_item(path)
+                added += 1
         if added:
-            self.matches.extend([None]*added)
-            self._log(f"+ Added {added} file(s)"); self._refresh_ui()
+            self.matches.extend([None] * added)
+            self._log(f"+ Added {added} file(s)")
+            self._refresh_ui()
 
     def _add_file_item(self, path):
         item = QListWidgetItem(os.path.basename(path))
@@ -2764,7 +2887,8 @@ class SortIQApp(QMainWindow):
     def _on_match_hard_error(self, error_msg):
         self.progress_bar.setVisible(False)
         self.match_btn.setEnabled(True)
-        if hasattr(self,'match_worker'): self.match_worker.quit()
+        if hasattr(self, 'match_worker'):
+            self.match_worker.stop()  # Signal the loop to exit at next iteration
         if "401" in error_msg or "Unauthorized" in error_msg or "invalid" in error_msg.lower():
             reply = QMessageBox.critical(self,"Invalid API Key",
                 "TMDB rejected the API key (401 Unauthorized).\n\n"
@@ -2789,14 +2913,18 @@ class SortIQApp(QMainWindow):
 
     # ── Subtitles ─────────────────────────────────────────────────
     def fetch_subtitles(self):
-        if not self.files: QMessageBox.warning(self,"No Files","Please add files first."); return
-        self._log("\u27f3  Fetching subtitles\u2026"); fetcher = SubtitleFetcher()
-        for fp in self.files:
-            try:
-                sub = fetcher.fetch_subtitle(fp)
-                self._log(f"\u2b07  {os.path.basename(sub)}" if sub else f"\u2717  No subtitle: {os.path.basename(fp)}")
-            except Exception as e:
-                self._log(f"\u26a0  {os.path.basename(fp)}: {e}")
+        if not self.files:
+            QMessageBox.warning(self, "No Files", "Please add files first."); return
+        self._log("\u27f3  Fetching subtitles\u2026")
+        self.fetch_subs_btn.setEnabled(False)
+        self._sub_worker = SubtitleWorker(self.files)
+        self._sub_worker.status.connect(self._log)
+        self._sub_worker.finished.connect(self._on_subs_finished)
+        self._sub_worker.start()
+
+    def _on_subs_finished(self, fetched, total):
+        self.fetch_subs_btn.setEnabled(True)
+        self._log(f"\u2713  Subtitles: {fetched}/{total} downloaded.")
 
     # ── Rename ────────────────────────────────────────────────────
     def rename_files(self):
@@ -2847,25 +2975,43 @@ class SortIQApp(QMainWindow):
     def undo_rename(self):
         op = self.history.undo()
         if not op: return
+        src, dst = op['new_path'], op['original_path']
+        if not os.path.exists(src):
+            # File was already moved or is missing — revert index so undo stays consistent
+            self.history.current_index += 1
+            self.history._save_history()
+            QMessageBox.warning(self, "Undo Failed", f"File not found:\n{src}")
+            return
         try:
-            src,dst = op['new_path'],op['original_path']
-            if os.path.exists(src):
-                shutil.move(src,dst)
-                self._log(f"\u21a9  Undone: {os.path.basename(src)}"); self._update_undo_redo()
-            else: QMessageBox.warning(self,"Undo Failed",f"File not found:\n{src}")
-        except Exception as e: QMessageBox.critical(self,"Error",f"Undo failed: {e}")
+            shutil.move(src, dst)
+            self._log(f"\u21a9  Undone: {os.path.basename(src)}")
+        except Exception as e:
+            # Revert index — operation did not complete
+            self.history.current_index += 1
+            self.history._save_history()
+            QMessageBox.critical(self, "Error", f"Undo failed: {e}")
+        self._update_undo_redo()
 
     def redo_rename(self):
         op = self.history.redo()
         if not op: return
+        src, dst = op['original_path'], op['new_path']
+        if not os.path.exists(src):
+            # Revert index — source is gone
+            self.history.current_index -= 1
+            self.history._save_history()
+            QMessageBox.warning(self, "Redo Failed", f"Source no longer exists:\n{src}")
+            return
         try:
-            src,dst = op['original_path'],op['new_path']
-            if os.path.exists(src):
-                os.makedirs(os.path.dirname(dst),exist_ok=True)
-                shutil.move(src,dst)
-                self._log(f"\u21aa  Redone: {os.path.basename(dst)}"); self._update_undo_redo()
-            else: QMessageBox.warning(self,"Redo Failed",f"Source no longer exists:\n{src}")
-        except Exception as e: QMessageBox.critical(self,"Error",f"Redo failed: {e}")
+            os.makedirs(os.path.dirname(dst), exist_ok=True)
+            shutil.move(src, dst)
+            self._log(f"\u21aa  Redone: {os.path.basename(dst)}")
+        except Exception as e:
+            # Revert index — operation did not complete
+            self.history.current_index -= 1
+            self.history._save_history()
+            QMessageBox.critical(self, "Error", f"Redo failed: {e}")
+        self._update_undo_redo()
 
     # ── Presets ───────────────────────────────────────────────────
     def load_preset(self, name):
@@ -2935,6 +3081,19 @@ class SortIQApp(QMainWindow):
 # ── Entry ─────────────────────────────────────────────────────────────────────
 
 def main():
+    # AppImage: set platform hints before QApplication is constructed so the
+    # window manager can apply full decorations (minimize / maximize / close).
+    # Prefer xcb (X11) on X11 sessions; leave Wayland sessions untouched.
+    if os.environ.get("APPIMAGE"):
+        if not os.environ.get("QT_QPA_PLATFORM"):
+            # Only override if not already set; respect user's choice.
+            if os.environ.get("WAYLAND_DISPLAY") and not os.environ.get("DISPLAY"):
+                os.environ["QT_QPA_PLATFORM"] = "wayland"
+            else:
+                os.environ.setdefault("QT_QPA_PLATFORM", "xcb")
+        # Disable DPI scaling quirks that can strip window decorations on HiDPI
+        os.environ.setdefault("QT_AUTO_SCREEN_SCALE_FACTOR", "0")
+
     app = QApplication(sys.argv)
     app.setApplicationName("SortIQ")
     app.setDesktopFileName("sortiq")   # links running window → .desktop → taskbar icon on Linux

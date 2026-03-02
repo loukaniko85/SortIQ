@@ -167,8 +167,8 @@ class JobQueue:
                 if job._cancelled:
                     break
 
-                job.progress.current      = i
-                job.progress.percent      = round(i / max(len(files), 1) * 100, 1)
+                job.progress.current      = i + 1
+                job.progress.percent      = round((i + 1) / max(len(files), 1) * 100, 1)
                 job.progress.current_file = os.path.basename(fp)
 
                 try:
