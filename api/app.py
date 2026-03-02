@@ -63,7 +63,7 @@ app = FastAPI(
         "| `POST /api/v1/history/undo` | Undo last rename |\n"
         "| `POST /api/v1/history/redo` | Redo last undone rename |\n"
     ),
-    version      = "1.2.0",
+    version      = "1.3.0",
     contact      = {"name": "loukaniko"},
     license_info = {"name": "MIT"},
     docs_url     = "/docs",

@@ -63,7 +63,7 @@ class ArtworkDownloader:
         self.image_base     = "https://image.tmdb.org/t/p"
         self.fanart_base    = "https://webservice.fanart.tv/v3"
         self.session        = requests.Session()
-        self.session.headers.update({"User-Agent": "SortIQ/1.2"})
+        self.session.headers.update({"User-Agent": "SortIQ/1.3"})
 
     # ── TMDB ──────────────────────────────────────────────────────
 
@@ -182,12 +182,16 @@ class ArtworkDownloader:
     def _save_image(self, url: str, output_dir: str, filename: str) -> Optional[str]:
         try:
             r = self.session.get(url, timeout=30, stream=True)
-            if not r.ok: return None
-            os.makedirs(output_dir, exist_ok=True)
-            filepath = os.path.join(output_dir, filename)
-            with open(filepath, "wb") as fh:
-                shutil.copyfileobj(r.raw, fh)
-            return filepath
+            try:
+                if not r.ok:
+                    return None
+                os.makedirs(output_dir, exist_ok=True)
+                filepath = os.path.join(output_dir, filename)
+                with open(filepath, "wb") as fh:
+                    shutil.copyfileobj(r.raw, fh)
+                return filepath
+            finally:
+                r.close()
         except Exception as e:
             log.warning("Image save failed: %s", e)
             return None

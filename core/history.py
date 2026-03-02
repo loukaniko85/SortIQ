@@ -4,6 +4,7 @@ Rename history manager - tracks rename operations for undo/redo
 
 import json
 import os
+import threading
 from pathlib import Path
 from typing import List, Dict, Optional
 from datetime import datetime
@@ -11,13 +12,14 @@ from datetime import datetime
 
 class RenameHistory:
     """Manages rename history for undo/redo operations"""
-    
+
     def __init__(self, history_file: str = None):
         self.history_file = history_file or os.path.join(
             os.path.expanduser("~"), ".sortiq", "history.json"
         )
         self.history: List[Dict] = []
         self.current_index = -1
+        self._lock = threading.Lock()
         self._ensure_history_dir()
         self._load_history()
     
@@ -53,50 +55,53 @@ class RenameHistory:
             'new_path': new_path,
             'match_info': match_info or {}
         }
-        
-        # Remove any operations after current index (when undoing)
-        if self.current_index < len(self.history) - 1:
-            self.history = self.history[:self.current_index + 1]
-        
-        self.history.append(operation)
-        self.current_index = len(self.history) - 1
-        
-        # Keep only last 100 operations
-        if len(self.history) > 100:
-            self.history = self.history[-100:]
+        with self._lock:
+            # Remove any operations after current index (when undoing)
+            if self.current_index < len(self.history) - 1:
+                self.history = self.history[:self.current_index + 1]
+
+            self.history.append(operation)
             self.current_index = len(self.history) - 1
-        
+
+            # Keep only last 100 operations
+            if len(self.history) > 100:
+                self.history = self.history[-100:]
+                self.current_index = len(self.history) - 1
+
         self._save_history()
-    
+
     def can_undo(self) -> bool:
         """Check if undo is possible"""
-        return self.current_index >= 0
-    
+        with self._lock:
+            return self.current_index >= 0
+
     def can_redo(self) -> bool:
         """Check if redo is possible"""
-        return self.current_index < len(self.history) - 1
-    
+        with self._lock:
+            return self.current_index < len(self.history) - 1
+
     def undo(self) -> Optional[Dict]:
         """Get the last operation to undo"""
-        if not self.can_undo():
-            return None
-        
-        operation = self.history[self.current_index]
-        self.current_index -= 1
+        with self._lock:
+            if self.current_index < 0:
+                return None
+            operation = self.history[self.current_index]
+            self.current_index -= 1
         self._save_history()
         return operation
-    
+
     def redo(self) -> Optional[Dict]:
         """Get the next operation to redo"""
-        if not self.can_redo():
-            return None
-        
-        self.current_index += 1
-        operation = self.history[self.current_index]
+        with self._lock:
+            if self.current_index >= len(self.history) - 1:
+                return None
+            self.current_index += 1
+            operation = self.history[self.current_index]
         self._save_history()
         return operation
-    
+
     def get_last_operations(self, count: int = 10) -> List[Dict]:
         """Get last N operations"""
-        start = max(0, len(self.history) - count)
-        return self.history[start:]
+        with self._lock:
+            start = max(0, len(self.history) - count)
+            return list(self.history[start:])

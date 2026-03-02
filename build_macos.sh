@@ -2,7 +2,7 @@
 # ─────────────────────────────────────────────────────────────────────────────
 # SortIQ macOS build — arm64 native (Apple Silicon)
 #
-# Produces:  SortIQ-1.2-macOS.dmg
+# Produces:  SortIQ-1.3-macOS.dmg
 # Runs on:   Apple Silicon natively; Intel Macs via Rosetta 2 (automatic)
 #
 # Note: universal2 (fat arm64+x86_64) is not used because pydantic_core and
@@ -16,7 +16,7 @@
 set -e
 
 APP_NAME="SortIQ"
-APP_VERSION="1.2"
+APP_VERSION="1.3"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "${SCRIPT_DIR}"
 

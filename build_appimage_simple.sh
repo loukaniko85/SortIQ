@@ -4,7 +4,7 @@
 set -e
 
 APP_NAME="SortIQ"
-APP_VERSION="1.2"
+APP_VERSION="1.3"
 
 echo "Building $APP_NAME AppImage (simplified method)..."
 

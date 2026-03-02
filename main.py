@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-SortIQ v1.2 — Intelligent media sorting & renaming. Amber on obsidian.
+SortIQ v1.3 — Intelligent media sorting & renaming. Amber on obsidian.
 """
 
 import sys
@@ -422,8 +422,7 @@ class RenameWorker(QThread):
                                 kodi_poster = dest.parent / "folder.jpg"
                                 if not kodi_poster.exists():
                                     try:
-                                        import shutil as _sh
-                                        _sh.copy2(p, str(kodi_poster))
+                                        shutil.copy2(p, str(kodi_poster))
                                     except Exception:
                                         pass
                         if self.download_fanart:
@@ -433,8 +432,7 @@ class RenameWorker(QThread):
                                 kodi_fanart = dest.parent / "fanart.jpg"
                                 if not kodi_fanart.exists():
                                     try:
-                                        import shutil as _sh
-                                        _sh.copy2(fa, str(kodi_fanart))
+                                        shutil.copy2(fa, str(kodi_fanart))
                                     except Exception:
                                         pass
                                 self.status.emit(f"   \U0001f304  Fanart: {os.path.basename(fa)}")
@@ -576,7 +574,7 @@ class SettingsDialog(QDialog):
         app_name.setAlignment(Qt.AlignmentFlag.AlignCenter)
         av.addWidget(app_name)
 
-        version_lbl = QLabel("v1.2  —  The open-source FileBot alternative")
+        version_lbl = QLabel("v1.3  —  The open-source FileBot alternative")
         version_lbl.setStyleSheet("color: #6B7280; font-size: 13px; border: none;")
         version_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         av.addWidget(version_lbl)
@@ -980,7 +978,7 @@ class BatchJobsDialog(QDialog):
         job = item.data(Qt.ItemDataRole.UserRole)
         if not job: return
         self._selected_job_id = job.get("job_id","")
-        status  = job.get("status","?")
+        status  = job.get("status") or "unknown"
         pct     = job.get("progress",{}).get("percent",0)
         renamed = job.get("renamed_count",0)
         errors  = job.get("error_count",0)
@@ -1226,7 +1224,7 @@ class DuplicateFinderDialog(QDialog):
         rows = sorted(set(i.row() for i in self._table.selectedItems()), reverse=True)
         if not rows:
             return
-        paths = [self._table.item(r, 0).text() for r in rows]
+        paths = [self._table.item(r, 0).text() for r in rows if self._table.item(r, 0)]
         confirm = QMessageBox.question(
             self, "Delete Files",
             "Permanently delete {} file(s)?\n\n".format(len(paths)) + "\n".join(paths[:5]) + ("\n…" if len(paths) > 5 else ""),
@@ -2277,6 +2275,13 @@ class SortIQApp(QMainWindow):
         self.files=[]; self.matches=[]
         self.matcher=MediaMatcher(); self.renamer=FileRenamer()
         self.history=RenameHistory(); self.preset_manager=PresetManager()
+        # Worker references — always initialize so hasattr checks aren't needed
+        self.match_worker = None
+        self._scan_worker = None
+        # Batch undo tracking — set to None until first rename batch runs
+        self._batch_start_op_idx = None
+        # Map of {source_path: dest_path} populated by _on_op_complete for "Show in folder"
+        self._rename_dests: dict = {}
         self._build_ui()
         self.setAcceptDrops(True)
 
@@ -2299,7 +2304,7 @@ class SortIQApp(QMainWindow):
         title = QLabel("SortIQ")
         title.setStyleSheet(f"color:{C_TEXT}; font-size:16px; font-weight:700; letter-spacing:-0.5px; border:none;")
         h.addWidget(title)
-        badge = QLabel("v1.2")
+        badge = QLabel("v1.3")
         badge.setStyleSheet(f"color:{C_AMBER_DIM}; background:rgba(245,158,11,0.1); border:1px solid {C_AMBER_DIM}; border-radius:3px; padding:1px 5px; font-size:9px; font-weight:700; letter-spacing:1px;")
         h.addWidget(badge)
         h.addStretch()
@@ -3097,7 +3102,10 @@ class SortIQApp(QMainWindow):
             return
 
         # Enable Undo Batch if any ops were recorded in this run
-        ops_this_batch = self.history.current_index - getattr(self, '_batch_start_op_idx', self.history.current_index)
+        if self._batch_start_op_idx is not None:
+            ops_this_batch = self.history.current_index - self._batch_start_op_idx
+        else:
+            ops_this_batch = 0
         self.undo_batch_btn.setEnabled(ops_this_batch > 0)
 
         # Offer Sonarr/Radarr library refresh if configured and not a dry run
@@ -3308,7 +3316,7 @@ class SortIQApp(QMainWindow):
                 self.remove_selected()
             return
         if key == Qt.Key.Key_Escape:
-            if hasattr(self, 'match_worker'):
+            if self.match_worker is not None:
                 self.match_worker.stop()
                 self._log("\u23f9  Match cancelled by user")
             return

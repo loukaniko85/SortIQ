@@ -2,8 +2,8 @@
 
 SortIQ ships a full REST API built on **FastAPI**. It gives you every capability of the GUI in a scriptable, automatable form — perfect for NAS setups, home media servers, CI pipelines, and unattended batch renaming.
 
-**Swagger UI (interactive):** `http://localhost:8060/docs`  
-**ReDoc (readable):** `http://localhost:8060/redoc`  
+**Swagger UI (interactive):** `http://localhost:8060/docs`
+**ReDoc (readable):** `http://localhost:8060/redoc`
 **OpenAPI JSON:** `http://localhost:8060/openapi.json`
 
 ---
@@ -11,30 +11,32 @@ SortIQ ships a full REST API built on **FastAPI**. It gives you every capability
 ## Quick start
 
 ```bash
-# Start the container (API + GUI)
+# Start the container (GUI + API)
 docker run -p 6080:6080 -p 8060:8060 \
   -e TMDB_API_KEY=your_key \
   -v ~/Media:/media \
-  sortiq
-
-# Set your key via the API (alternative to env var)
-curl -X POST "http://localhost:8060/api/v1/settings/keys?tmdb=YOUR_KEY"
+  ghcr.io/loukaniko/sortiq
 
 # Check health
 curl http://localhost:8060/api/v1/health
+
+# Set keys at runtime (no restart required)
+curl -X PATCH http://localhost:8060/api/v1/settings \
+  -H "Content-Type: application/json" \
+  -d '{"tmdb_api_key": "your_key"}'
 ```
 
 ---
 
 ## Endpoints
 
-All endpoints are under the prefix `/api/v1`.
+All endpoints are prefixed with `/api/v1`.
 
-### Info
+### Health
 
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/health` | Health check — key status, mediainfo availability |
+| GET | `/health` | Health check — API key status, mediainfo availability |
 | GET | `/naming-tokens` | Reference for all `{token}` placeholders |
 
 ### Media operations
@@ -46,6 +48,8 @@ All endpoints are under the prefix `/api/v1`.
 | POST | `/media/search` | Search TMDB for movies or TV shows |
 | POST | `/media/match` | Match files against TMDB/TVDB — returns proposed names |
 | POST | `/media/rename` | Match **and** rename files in one synchronous call |
+| POST | `/media/auto-rename` | Scan directory + match + rename in one call |
+| POST | `/media/stats` | Library statistics: file count, size, breakdown by extension and resolution |
 | POST | `/media/checksum` | Compute MD5/SHA1/SHA256 checksums with optional sidecar files |
 
 ### Batch jobs (async)
@@ -58,42 +62,59 @@ All endpoints are under the prefix `/api/v1`.
 | POST | `/jobs/{job_id}/cancel` | Cancel a running job |
 | DELETE | `/jobs/{job_id}` | Remove a job record |
 
+### Watch folders
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/watchers` | Create a watch folder (auto-rename new media files) |
+| GET | `/watchers` | List all configured watch folders |
+| GET | `/watchers/{watcher_id}` | Get watch folder status and statistics |
+| POST | `/watchers/{watcher_id}/start` | Start or resume a paused/stopped watcher |
+| POST | `/watchers/{watcher_id}/pause` | Pause a watcher (keeps seen-file history) |
+| POST | `/watchers/{watcher_id}/stop` | Stop a watcher |
+| DELETE | `/watchers/{watcher_id}` | Stop and remove a watch folder |
+
 ### Presets
 
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/presets` | List all naming scheme presets |
+| GET | `/presets` | List all naming scheme presets (built-in + user) |
 | POST | `/presets` | Create or update a preset |
-| DELETE | `/presets/{name}` | Delete a preset |
+| DELETE | `/presets/{name}` | Delete a user preset (built-in presets cannot be deleted) |
 
 ### History
 
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/history` | Get rename history (supports undo from the GUI) |
+| GET | `/history` | Get rename history with undo/redo availability |
+| POST | `/history/undo` | Undo the most recent rename |
+| POST | `/history/redo` | Redo a previously undone rename |
+| DELETE | `/history` | Clear all rename history |
 
 ### Settings
 
 | Method | Path | Description |
 |--------|------|-------------|
-| POST | `/settings/keys` | Update API keys at runtime — no restart required |
+| GET | `/settings` | Read current settings (key values never returned — only set/not-set status) |
+| PATCH | `/settings` | Update settings — partial update, only provided fields changed |
+| POST | `/settings/keys` | Convenience alias for `PATCH /settings` |
 
 ---
 
 ## Naming scheme tokens
 
-| Token | Description |
-|-------|-------------|
-| `{n}` | Title (movie or show name) |
-| `{y}` | Year |
-| `{t}` | Episode title |
-| `{s}` | Season number (S01) |
-| `{e}` | Episode number (E01) |
-| `{s00e00}` | Season+episode combined (S01E01) |
-| `{vf}` | Video resolution (1080p, 720p…) |
-| `{vc}` | Video codec (x264, x265, HEVC…) |
-| `{af}` | Audio codec (AAC, AC3, DTS…) |
-| `{ac}` | Audio channels (5.1, 2.0…) |
+| Token | Description | Example output |
+|-------|-------------|----------------|
+| `{n}` | Title (movie or show name) | `Breaking Bad` |
+| `{y}` | Year | `2008` |
+| `{t}` | Episode title (multi-episode: joined with ` + `) | `Pilot + Cat's in the Bag` |
+| `{s}` | Season number | `S01` |
+| `{e}` | Episode number or range | `E01` or `E01-E03` |
+| `{s00e00}` | Season + episode combined | `S01E01` or `S01E01-E03` |
+| `{vf}` | Video resolution | `1080p`, `720p`, `4K` |
+| `{vc}` | Video codec | `x264`, `x265`, `HEVC` |
+| `{af}` | Audio codec | `AAC`, `AC3`, `DTS` |
+| `{ac}` | Audio channels | `5.1`, `2.0` |
 
 ### Built-in preset schemes
 
@@ -125,7 +146,7 @@ curl -s -X POST http://localhost:8060/api/v1/media/rename \
   }' | python3 -m json.tool
 ```
 
-### 2 — Batch rename a whole folder
+### 2 — Batch rename a whole folder (synchronous)
 
 ```bash
 curl -s -X POST http://localhost:8060/api/v1/media/rename \
@@ -140,7 +161,21 @@ curl -s -X POST http://localhost:8060/api/v1/media/rename \
   }'
 ```
 
-### 3 — Submit async batch job and poll for progress
+### 3 — Auto-rename a directory in one call
+
+```bash
+curl -s -X POST http://localhost:8060/api/v1/media/auto-rename \
+  -H "Content-Type: application/json" \
+  -d '{
+    "directory": "/media/Downloads/TV",
+    "naming_scheme": "{n}/Season {s}/{n} - {s00e00} - {t}",
+    "output_dir": "/media/TV",
+    "operation": "move",
+    "dry_run": true
+  }' | python3 -m json.tool
+```
+
+### 4 — Submit async batch job and poll for progress
 
 ```bash
 # Submit
@@ -159,14 +194,15 @@ echo "Job ID: $JOB_ID"
 
 # Poll
 while true; do
-  STATUS=$(curl -s "http://localhost:8060/api/v1/jobs/$JOB_ID" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['status'], d['progress']['percent'],'%')")
+  STATUS=$(curl -s "http://localhost:8060/api/v1/jobs/$JOB_ID" | \
+    python3 -c "import sys,json; d=json.load(sys.stdin); print(d['status'], d['progress']['percent'],'%')")
   echo $STATUS
   echo "$STATUS" | grep -qE "completed|failed|cancelled" && break
   sleep 2
 done
 ```
 
-### 4 — Submit job with webhook callback
+### 5 — Submit job with webhook callback
 
 ```bash
 curl -X POST http://localhost:8060/api/v1/jobs \
@@ -179,9 +215,26 @@ curl -X POST http://localhost:8060/api/v1/jobs \
   }'
 ```
 
-The webhook receives a `POST` with the job summary JSON on completion.
+The webhook receives a `POST` with the full job summary JSON on completion (or failure).
 
-### 5 — Generate checksums for verification
+### 6 — Create a watch folder
+
+```bash
+curl -X POST http://localhost:8060/api/v1/watchers \
+  -H "Content-Type: application/json" \
+  -d '{
+    "directory": "/media/Downloads",
+    "naming_scheme": "{n} ({y})",
+    "output_dir": "/media/Movies",
+    "operation": "move",
+    "poll_interval_secs": 60,
+    "auto_start": true
+  }'
+```
+
+The watcher scans every `poll_interval_secs` seconds, skipping files still being downloaded (`.part`, `.crdownload`, etc.). New files are matched and renamed automatically; results appear in `GET /jobs`.
+
+### 7 — Generate checksums for verification
 
 ```bash
 curl -X POST http://localhost:8060/api/v1/media/checksum \
@@ -193,7 +246,17 @@ curl -X POST http://localhost:8060/api/v1/media/checksum \
   }'
 ```
 
-### 6 — Search for a title manually
+### 8 — Library statistics
+
+```bash
+curl -X POST http://localhost:8060/api/v1/media/stats \
+  -H "Content-Type: application/json" \
+  -d '{"directory": "/media/Movies", "recursive": true}'
+```
+
+Returns total file count, total size in MB, and breakdowns by extension and resolution.
+
+### 9 — Search for a title manually
 
 ```bash
 curl -X POST http://localhost:8060/api/v1/media/search \
@@ -201,14 +264,26 @@ curl -X POST http://localhost:8060/api/v1/media/search \
   -d '{"query": "The Dark Knight", "year": 2008, "type": "movie"}'
 ```
 
-### 7 — Headless API-only mode (no GUI)
+### 10 — Undo the last rename
 
 ```bash
-docker run -p 8060:8060 \
-  -e TMDB_API_KEY=your_key \
-  -v ~/Media:/media \
-  sortiq api
+curl -X POST http://localhost:8060/api/v1/history/undo
 ```
+
+### 11 — Update settings at runtime
+
+```bash
+curl -X PATCH http://localhost:8060/api/v1/settings \
+  -H "Content-Type: application/json" \
+  -d '{
+    "tmdb_api_key": "your_tmdb_key",
+    "sonarr_url": "http://localhost:8989",
+    "sonarr_key": "your_sonarr_key",
+    "default_naming_scheme": "{n} ({y})"
+  }'
+```
+
+Keys are persisted to `~/.sortiq/settings.json` and injected into the running process immediately — no restart required.
 
 ---
 
@@ -282,7 +357,7 @@ docker run -d \
   -e TMDB_API_KEY=your_key \
   -v ~/.sortiq:/root/.sortiq \
   -v /mnt/media:/media \
-  sortiq api
+  ghcr.io/loukaniko/sortiq api
 ```
 
 Or with compose — uncomment the `sortiq-api` service in `docker-compose.yml`.
@@ -297,7 +372,10 @@ All errors follow the standard FastAPI format:
 {"detail": "Human-readable error message"}
 ```
 
-Common errors:
-- `404` — File or job not found
-- `422` — Validation error (check your request body)
+Common HTTP status codes:
+- `201` — Resource created (new job, new watcher, new preset)
+- `204` — Success, no content (delete operations)
+- `400` — Bad request (e.g., tried to delete a built-in preset)
+- `404` — File, directory, job, or watcher not found
+- `422` — Validation error (check your request body against the schema)
 - `500` — Internal error (usually a bad API key or network issue — check `/health`)

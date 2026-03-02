@@ -16,13 +16,24 @@ presets_router = APIRouter(prefix="/presets", tags=["Presets"])
 history_router = APIRouter(prefix="/history", tags=["History"])
 
 
+# Module-level singletons — presets and history load from disk once at startup,
+# not on every API request (unnecessary repeated file I/O).
+_preset_manager = None
+_rename_history = None
+
 def _pm():
-    from core.presets import PresetManager
-    return PresetManager()
+    global _preset_manager
+    if _preset_manager is None:
+        from core.presets import PresetManager
+        _preset_manager = PresetManager()
+    return _preset_manager
 
 def _hist():
-    from core.history import RenameHistory
-    return RenameHistory()
+    global _rename_history
+    if _rename_history is None:
+        from core.history import RenameHistory
+        _rename_history = RenameHistory()
+    return _rename_history
 
 
 # ── Presets ───────────────────────────────────────────────────────────────────

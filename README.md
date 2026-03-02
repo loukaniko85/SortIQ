@@ -6,7 +6,7 @@
 Matches, renames and organises your movies, TV shows and anime automatically.
 
 [![Build](https://github.com/loukaniko/sortiq/actions/workflows/build.yml/badge.svg)](https://github.com/loukaniko/sortiq/actions)
-![Version](https://img.shields.io/badge/version-1.2-orange)
+![Version](https://img.shields.io/badge/version-1.3-orange)
 ![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)
 ![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-blue.svg)
 ![Platform](https://img.shields.io/badge/Platform-Linux%20%7C%20Windows%20%7C%20macOS-lightgrey.svg)
@@ -92,8 +92,23 @@ python3 cli.py --help    # CLI
 - Built-in presets for **Plex**, **Kodi**, **Jellyfin**, **FileBot-style**, **Anime**
 - **Dry-run mode** — preview every rename without touching files
 - **Copy or Move** — keep originals or rename in place
+- **Conflict resolution** — choose Skip, Rename with suffix `(1)`, or Overwrite per batch
 - **Rename conflict detection** — amber highlight when two files would produce the same output name
-- Full **undo / redo** with persistent history
+- Full **undo / redo** with persistent history; **Undo Batch** reverses an entire rename run in one click
+- **IMDb ID search** — type `tt1234567` in the manual search to match by IMDb ID directly
+- **TMDB result caching** — show lookups cached per session; batch-renaming 20 episodes of the same show does only 1 show query
+
+### Keyboard shortcuts
+
+| Shortcut | Action |
+|---|---|
+| `Ctrl+M` | Match files |
+| `Ctrl+R` | Rename files |
+| `Ctrl+Z` | Undo last rename |
+| `Ctrl+Y` | Redo |
+| `Ctrl+,` | Open Settings |
+| `Delete` | Remove selected files from list |
+| `Escape` | Cancel running match |
 
 ### Multi-episode handling
 
@@ -243,15 +258,15 @@ Full docs: [API.md](API.md)
 ```bash
 # Linux AppImage (self-contained, ~115 MB)
 ./build_appimage.sh
-# Produces: SortIQ-1.2-x86_64.AppImage
+# Produces: SortIQ-1.3-x86_64.AppImage
 
 # Windows portable zip (run in Git Bash or GitHub Actions)
 ./build_windows.sh
-# Produces: SortIQ-1.2-Windows.zip
+# Produces: SortIQ-1.3-Windows.zip
 
 # macOS Universal DMG (arm64 + x86_64 — runs natively on Apple Silicon and Intel)
 ./build_macos.sh
-# Produces: SortIQ-1.2-macOS-universal.dmg
+# Produces: SortIQ-1.3-macOS-universal.dmg
 
 # Docker
 docker build -t sortiq .

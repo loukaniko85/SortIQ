@@ -20,7 +20,7 @@ log = logging.getLogger(__name__)
 
 _PLACEHOLDERS = frozenset({"", "YOUR_OPENSUBTITLES_KEY"})
 _BASE = "https://api.opensubtitles.com/api/v1"
-_APP  = "SortIQ v1.2"
+_APP  = "SortIQ v1.3"
 
 
 def _read_osub_key() -> str:

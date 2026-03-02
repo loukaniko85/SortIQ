@@ -113,7 +113,8 @@ class JobQueue:
         return job
 
     def get(self, job_id: str) -> Optional[Job]:
-        return self._jobs.get(job_id)
+        with self._lock:
+            return self._jobs.get(job_id)
 
     def list_all(self) -> List[Job]:
         with self._lock:

@@ -2,7 +2,7 @@
 # ─────────────────────────────────────────────────────────────────────────────
 # SortIQ Windows build
 #
-# Produces:  SortIQ-1.2-Windows.zip  (portable folder)
+# Produces:  SortIQ-1.3-Windows.zip  (portable folder)
 #
 # Run in:  Git Bash, MSYS2, or GitHub Actions (windows-latest)
 # Needs:   Python 3.11+, pip
@@ -10,7 +10,7 @@
 set -e
 
 APP_NAME="SortIQ"
-APP_VERSION="1.2"
+APP_VERSION="1.3"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "${SCRIPT_DIR}"
 

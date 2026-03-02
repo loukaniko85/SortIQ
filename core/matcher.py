@@ -74,7 +74,7 @@ class MediaMatcher:
 
         self.session = requests.Session()
         self.session.headers.update({
-            "User-Agent": "SortIQ/1.2",
+            "User-Agent": "SortIQ/1.3",
             "Accept": "application/json",
         })
 
@@ -325,6 +325,7 @@ class MediaMatcher:
             return result
         except Exception as exc:
             log.warning("search_by_imdb_id(%r): %s", imdb_id, exc)
+            self._cache[cache_key] = None
             return None
 
     def _match_tmdb_movie(self, info: Dict) -> Optional[Dict]:

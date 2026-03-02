@@ -276,6 +276,7 @@ class HistoryEntry(BaseModel):
     original_path:  str
     new_path:       str
     match_info:     Optional[Dict[str, Any]] = None
+    model_config = {"extra": "ignore"}  # tolerate extra keys added in future history entries
 
 class HistoryResponse(BaseModel):
     entries:        List[HistoryEntry]
@@ -369,6 +370,6 @@ class WatcherInfo(BaseModel):
 
 class HealthResponse(BaseModel):
     status:         str
-    version:        str                 = "1.2"
+    version:        str                 = "1.3.0"
     tmdb_key_set:   bool
     mediainfo_available: bool

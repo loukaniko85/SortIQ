@@ -10,7 +10,29 @@ TV NFO:    <tvshow>   — placed in the show root folder
 import os
 import xml.etree.ElementTree as ET
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict, List, Optional
+
+
+def _iter_names(mi: Dict, *keys) -> List[str]:
+    """Yield string names from a field that may be list[dict], list[str], or comma str.
+
+    TMDB returns genres as [{"id":1,"name":"Action"}, ...] and production_companies
+    as [{"id":2,"name":"WB"}, ...].  Older/normalised data may be a plain comma string.
+    This helper handles all three forms so NFO writers never crash on type mismatches.
+    """
+    for key in keys:
+        val = mi.get(key)
+        if val is not None:
+            if isinstance(val, list):
+                for item in val:
+                    name = item.get("name", "") if isinstance(item, dict) else str(item)
+                    if name and name.strip():
+                        yield name.strip()
+            elif isinstance(val, str):
+                for part in val.split(","):
+                    if part.strip():
+                        yield part.strip()
+            return  # use first key that has a value
 
 
 def _indent(elem, level=0):
@@ -108,15 +130,13 @@ class NFOWriter:
         _text(root, "tmdbid",        mi.get("tmdb_id") or mi.get("id"))
         _text(root, "status",        mi.get("status"))
 
-        # Genres
-        for g in (mi.get("genres") or "").split(","):
-            if g.strip():
-                _text(root, "genre", g.strip())
+        # Genres — TMDB returns list[dict], older data may be a comma string
+        for g in _iter_names(mi, "genres"):
+            _text(root, "genre", g)
 
         # Studios / production companies
-        for s in (mi.get("studios") or mi.get("production_companies") or "").split(","):
-            if s.strip():
-                _text(root, "studio", s.strip())
+        for s in _iter_names(mi, "studios", "production_companies"):
+            _text(root, "studio", s)
 
         # Poster / fanart
         if mi.get("poster_path"):
@@ -181,13 +201,11 @@ class NFOWriter:
         _text(root, "tvdbid",        mi.get("tvdb_id"))
         _text(root, "imdbid",        mi.get("imdb_id"))
 
-        for g in (mi.get("genres") or "").split(","):
-            if g.strip():
-                _text(root, "genre", g.strip())
+        for g in _iter_names(mi, "genres"):
+            _text(root, "genre", g)
 
-        for s in (mi.get("studios") or mi.get("networks") or "").split(","):
-            if s.strip():
-                _text(root, "studio", s.strip())
+        for s in _iter_names(mi, "studios", "networks"):
+            _text(root, "studio", s)
 
         if mi.get("poster_path") or mi.get("poster_url"):
             _text(root, "thumb", mi.get("poster_path") or mi.get("poster_url"))

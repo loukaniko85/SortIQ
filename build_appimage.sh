@@ -9,7 +9,7 @@
 set -e
 
 APP_NAME="SortIQ"
-APP_VERSION="1.2"
+APP_VERSION="1.3"
 ARCH="x86_64"
 PYTHON_VERSION="3.11"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
