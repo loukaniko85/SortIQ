@@ -52,11 +52,9 @@ def save_settings(data: dict):
 
 _s = load_settings()
 for _env, _key in [
-    ("TMDB_API_KEY",            "tmdb_api_key"),
-    ("TVDB_API_KEY",            "tvdb_api_key"),
-    ("OPENSUBTITLES_API_KEY",   "opensubtitles_api_key"),
-    ("OPENSUBTITLES_USERNAME",  "opensubtitles_username"),
-    ("OPENSUBTITLES_PASSWORD",  "opensubtitles_password"),
+    ("TMDB_API_KEY",          "tmdb_api_key"),
+    ("TVDB_API_KEY",          "tvdb_api_key"),
+    ("OPENSUBTITLES_API_KEY", "opensubtitles_api_key"),
 ]:
     if _s.get(_key):
         os.environ.setdefault(_env, _s[_key])
@@ -542,29 +540,7 @@ class SettingsDialog(QDialog):
         self.tvdb_field = make_row("TVDB API Key", "Optional",
             "https://thetvdb.com/dashboard/account/apikey", "thetvdb.com")
         self.osub_field = make_row("OpenSubtitles Key", "Optional \u2014 for subtitle fetching",
-            "https://www.opensubtitles.com/", "opensubtitles.com")
-
-        # Username / password rows (plain layout — no external link needed)
-        def make_credential_row(label, placeholder, is_password=False):
-            box = QVBoxLayout(); box.setSpacing(4)
-            top = QHBoxLayout()
-            lbl = QLabel(label)
-            lbl.setStyleSheet("color: #9CA3AF; font-weight:600; font-size:12px; min-width:160px;")
-            top.addWidget(lbl)
-            field = QLineEdit(); field.setPlaceholderText(placeholder)
-            if is_password:
-                field.setEchoMode(QLineEdit.EchoMode.Password)
-            top.addWidget(field)
-            box.addLayout(top)
-            container = QWidget(); container.setLayout(box)
-            grid.addWidget(container)
-            return field
-
-        self.osub_user_field = make_credential_row(
-            "OpenSubtitles User", "Your opensubtitles.com username")
-        self.osub_pass_field = make_credential_row(
-            "OpenSubtitles Pass", "Your opensubtitles.com password", is_password=True)
-
+            "https://www.opensubtitles.com/consumers", "opensubtitles.com (free key, 10-20/day)")
         self.fanart_field = make_row("FanArt.tv API Key", "Optional \u2014 for HD logos, clearart, disc art",
             "https://fanart.tv/get-an-api-key/", "Get free client key at fanart.tv")
         layout.addLayout(grid)
@@ -687,8 +663,7 @@ class SettingsDialog(QDialog):
 
     def _toggle_echo(self, show):
         m = QLineEdit.EchoMode.Normal if show else QLineEdit.EchoMode.Password
-        for f in (self.tmdb_field, self.tvdb_field, self.osub_field,
-                  self.osub_pass_field, self.fanart_field):
+        for f in (self.tmdb_field, self.tvdb_field, self.osub_field, self.fanart_field):
             f.setEchoMode(m)
 
     def _load(self):
@@ -696,25 +671,19 @@ class SettingsDialog(QDialog):
         self.tmdb_field.setText(s.get("tmdb_api_key",""))
         self.tvdb_field.setText(s.get("tvdb_api_key",""))
         self.osub_field.setText(s.get("opensubtitles_api_key",""))
-        self.osub_user_field.setText(s.get("opensubtitles_username",""))
-        self.osub_pass_field.setText(s.get("opensubtitles_password",""))
         self.fanart_field.setText(s.get("fanart_api_key",""))
 
     def _save(self):
         s = load_settings()
-        s["tmdb_api_key"]           = self.tmdb_field.text().strip()
-        s["tvdb_api_key"]           = self.tvdb_field.text().strip()
-        s["opensubtitles_api_key"]  = self.osub_field.text().strip()
-        s["opensubtitles_username"] = self.osub_user_field.text().strip()
-        s["opensubtitles_password"] = self.osub_pass_field.text().strip()
-        s["fanart_api_key"]         = self.fanart_field.text().strip()
+        s["tmdb_api_key"]          = self.tmdb_field.text().strip()
+        s["tvdb_api_key"]          = self.tvdb_field.text().strip()
+        s["opensubtitles_api_key"] = self.osub_field.text().strip()
+        s["fanart_api_key"]        = self.fanart_field.text().strip()
         save_settings(s)
-        if s["tmdb_api_key"]:           os.environ["TMDB_API_KEY"]           = s["tmdb_api_key"]
-        if s["tvdb_api_key"]:           os.environ["TVDB_API_KEY"]           = s["tvdb_api_key"]
-        if s["opensubtitles_api_key"]:  os.environ["OPENSUBTITLES_API_KEY"]  = s["opensubtitles_api_key"]
-        if s["opensubtitles_username"]: os.environ["OPENSUBTITLES_USERNAME"]  = s["opensubtitles_username"]
-        if s["opensubtitles_password"]: os.environ["OPENSUBTITLES_PASSWORD"]  = s["opensubtitles_password"]
-        if s["fanart_api_key"]:         os.environ["FANART_API_KEY"]          = s["fanart_api_key"]
+        if s["tmdb_api_key"]:          os.environ["TMDB_API_KEY"]          = s["tmdb_api_key"]
+        if s["tvdb_api_key"]:          os.environ["TVDB_API_KEY"]          = s["tvdb_api_key"]
+        if s["opensubtitles_api_key"]: os.environ["OPENSUBTITLES_API_KEY"] = s["opensubtitles_api_key"]
+        if s["fanart_api_key"]:        os.environ["FANART_API_KEY"]        = s["fanart_api_key"]
         self.accept()
 
 

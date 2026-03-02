@@ -304,22 +304,30 @@ class MediaMatcher:
             tv_results    = data.get("tv_results", [])
             result = None
             if movie_results:
-                m = movie_results[0]
-                result = {
-                    "title":    m.get("title"),
-                    "year":     (m.get("release_date") or "")[:4] or None,
-                    "tmdb_id":  m.get("id"),
-                    "type":     "movie",
-                    "overview": m.get("overview", ""),
+                m        = movie_results[0]
+                movie_id = m.get("id")
+                details  = self._get_tmdb_movie_details(movie_id)
+                result   = {
+                    "title":                m.get("title"),
+                    "year":                 (m.get("release_date") or "")[:4] or None,
+                    "tmdb_id":              movie_id,
+                    "type":                 "movie",
+                    "overview":             m.get("overview", ""),
+                    "genres":               (details or {}).get("genres", []),
+                    "production_companies": (details or {}).get("production_companies", []),
                 }
             elif tv_results:
-                t = tv_results[0]
-                result = {
+                t        = tv_results[0]
+                show_id  = t.get("id")
+                details  = self._get_tmdb_show_details(show_id)
+                result   = {
                     "title":    t.get("name"),
                     "year":     (t.get("first_air_date") or "")[:4] or None,
-                    "tmdb_id":  t.get("id"),
+                    "tmdb_id":  show_id,
                     "type":     "tv",
                     "overview": t.get("overview", ""),
+                    "genres":   (details or {}).get("genres", []),
+                    "networks": (details or {}).get("networks", []),
                 }
             self._cache[cache_key] = result
             return result
@@ -355,16 +363,62 @@ class MediaMatcher:
             self._cache[cache_key] = None
             return None
 
-        movie = results[0]
+        movie    = results[0]
+        movie_id = movie.get("id")
+
+        # Fetch movie detail to get genres and production companies.
+        # /search/movie only returns genre_ids (ints), not name strings.
+        details = self._get_tmdb_movie_details(movie_id)
+
         result = {
-            "title":    movie.get("title"),
-            "year":     (movie.get("release_date") or "")[:4] or None,
-            "tmdb_id":  movie.get("id"),
-            "type":     "movie",
-            "overview": movie.get("overview", ""),
+            "title":                movie.get("title"),
+            "year":                 (movie.get("release_date") or "")[:4] or None,
+            "tmdb_id":              movie_id,
+            "type":                 "movie",
+            "overview":             movie.get("overview", ""),
+            "genres":               (details or {}).get("genres", []),
+            "production_companies": (details or {}).get("production_companies", []),
         }
         self._cache[cache_key] = result
         return result
+
+    def _get_tmdb_movie_details(self, movie_id: int) -> Optional[Dict]:
+        """Fetch full movie details (genres, companies) from /movie/{id}."""
+        if not movie_id:
+            return None
+        cache_key = ("movie_details", movie_id)
+        if cache_key in self._cache:
+            return self._cache[cache_key]
+        try:
+            result = self._get(
+                f"{self.tmdb_base_url}/movie/{movie_id}",
+                {"api_key": self.tmdb_api_key},
+            )
+            self._cache[cache_key] = result
+            return result
+        except Exception as exc:
+            log.warning("Failed to fetch movie details for id=%s: %s", movie_id, exc)
+            self._cache[cache_key] = None
+            return None
+
+    def _get_tmdb_show_details(self, show_id: int) -> Optional[Dict]:
+        """Fetch full TV show details (genres, networks) from /tv/{id}."""
+        if not show_id:
+            return None
+        cache_key = ("tv_details", show_id)
+        if cache_key in self._cache:
+            return self._cache[cache_key]
+        try:
+            result = self._get(
+                f"{self.tmdb_base_url}/tv/{show_id}",
+                {"api_key": self.tmdb_api_key},
+            )
+            self._cache[cache_key] = result
+            return result
+        except Exception as exc:
+            log.warning("Failed to fetch TV show details for id=%s: %s", show_id, exc)
+            self._cache[cache_key] = None
+            return None
 
     def _match_tmdb_tv(self, info: Dict) -> Optional[Dict]:
         if _is_unconfigured(self.tmdb_api_key):
@@ -393,6 +447,10 @@ class MediaMatcher:
         season   = info.get("season")
         episodes = info.get("episodes")   # list for multi-ep, else None
 
+        # Fetch show details for genres and networks (cached per show — only 1 call per show)
+        show_details = self._get_tmdb_show_details(show_id)
+
+        episode_overview: Optional[str] = None
         if episodes and len(episodes) > 1:
             # Fetch title for each episode in the range
             ep_titles = []
@@ -404,17 +462,22 @@ class MediaMatcher:
         else:
             episode_info  = self._get_tmdb_episode(show_id, season, info.get("episode"))
             episode_title = (episode_info or {}).get("name")
+            # Use the episode's own overview for metadata (more specific than show overview)
+            episode_overview = (episode_info or {}).get("overview") or None
 
         return {
             "title":         show.get("name"),
             "year":          (show.get("first_air_date") or "")[:4] or None,
             "season":        season,
             "episode":       info.get("episode"),
-            "episodes":      episodes,          # list or None
+            "episodes":      episodes,                     # list or None
             "episode_title": episode_title,
             "tmdb_id":       show_id,
             "type":          "tv",
-            "overview":      show.get("overview", ""),
+            # Episode overview for individual episodes; fall back to show overview
+            "overview":      episode_overview or show.get("overview", ""),
+            "genres":        (show_details or {}).get("genres", []),
+            "networks":      (show_details or {}).get("networks", []),
         }
 
     def _get_tmdb_episode(
