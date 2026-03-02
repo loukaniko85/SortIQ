@@ -171,7 +171,7 @@ class SubtitleFetcher:
         if not link:
             raise RuntimeError("No download link in response")
 
-        sub_resp = requests.get(link, timeout=30)
+        sub_resp = self.session.get(link, timeout=30)
         if not sub_resp.ok:
             raise RuntimeError(f"Subtitle file download returned {sub_resp.status_code}")
 

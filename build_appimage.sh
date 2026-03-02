@@ -118,6 +118,23 @@ echo "  ✓ Dependencies installed"
 # Headless smoke-test (QtCore only — QtWidgets needs a display)
 "${BUNDLED_PYTHON}" -c "import PyQt6.sip; import PyQt6.QtCore; print('  ✓ PyQt6.sip + QtCore OK')"
 
+# ── 2b. Bundle libxcb-cursor for Qt 6.5+ xcb platform plugin ─────────────────
+# Qt 6.5+ requires libxcb-cursor.so.0 to load the xcb platform plugin.
+# Bundle it so the AppImage works on X11 systems that don't have xcb-util-cursor
+# installed. (Wayland sessions don't need it — the AppRun logic prefers wayland
+# when WAYLAND_DISPLAY is present.)
+echo "[2b] Bundling libxcb-cursor..."
+mkdir -p "${APP_DIR}/usr/lib"
+XCB_CURSOR_PATH=$(ldconfig -p 2>/dev/null | grep -m1 'libxcb-cursor\.so\.0' | awk '{print $NF}')
+if [ -n "${XCB_CURSOR_PATH}" ] && [ -f "${XCB_CURSOR_PATH}" ]; then
+    cp -L "${XCB_CURSOR_PATH}" "${APP_DIR}/usr/lib/"
+    echo "  ✓ Bundled libxcb-cursor.so.0 (from ${XCB_CURSOR_PATH})"
+else
+    echo "  WARNING: libxcb-cursor.so.0 not found on this build host."
+    echo "           Install xcb-util-cursor (Fedora) / libxcb-cursor0 (Debian)"
+    echo "           before building, or xcb plugin may fail on X11 targets."
+fi
+
 # ── 3. Copy application files ─────────────────────────────────────────────────
 echo "[3/5] Installing application files..."
 APP_INSTALL="${APP_DIR}/usr/share/sortiq"
@@ -197,6 +214,8 @@ export PATH="\${APPDIR}/opt/python${PYTHON_VERSION}/bin:\${APPDIR}/usr/bin:\${PA
 
 _SITE="\${APPDIR}/opt/python${PYTHON_VERSION}/lib/python${PYTHON_VERSION}/site-packages"
 [ -d "\${_SITE}/PyQt6/Qt6/plugins" ] && export QT_PLUGIN_PATH="\${_SITE}/PyQt6/Qt6/plugins"
+# Expose bundled libs (e.g. libxcb-cursor.so.0) so the xcb plugin can load them.
+export LD_LIBRARY_PATH="\${APPDIR}/usr/lib:\${LD_LIBRARY_PATH}"
 export APPIMAGE="\${APPIMAGE:-appimage}"
 
 # Disable D-Bus portal for file dialogs.

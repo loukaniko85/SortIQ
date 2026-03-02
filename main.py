@@ -299,15 +299,18 @@ class FolderScanWorker(QThread):
 
     def run(self):
         found = []
-        for path in self.paths:
-            if os.path.isdir(path):
-                self.status.emit(f"\u27f3  Scanning {os.path.basename(path)}\u2026")
-                for p in sorted(Path(path).rglob("*")):
-                    if p.suffix.lower() in self.MEDIA_EXTS and p.is_file():
-                        found.append(str(p))
-            elif os.path.isfile(path):
-                if Path(path).suffix.lower() in self.MEDIA_EXTS:
-                    found.append(path)
+        try:
+            for path in self.paths:
+                if os.path.isdir(path):
+                    self.status.emit(f"\u27f3  Scanning {os.path.basename(path)}\u2026")
+                    for p in sorted(Path(path).rglob("*")):
+                        if p.suffix.lower() in self.MEDIA_EXTS and p.is_file():
+                            found.append(str(p))
+                elif os.path.isfile(path):
+                    if Path(path).suffix.lower() in self.MEDIA_EXTS:
+                        found.append(path)
+        except Exception as e:
+            self.status.emit(f"\u26a0  Scan error: {e}")
         self.files_found.emit(found)
 
 
@@ -2871,6 +2874,7 @@ class SortIQApp(QMainWindow):
         self.match_worker.matched.connect(self._on_match_result)
         self.match_worker.finished.connect(self._on_match_finished)
         self.match_worker.hard_error.connect(self._on_match_hard_error)
+        self.match_worker.finished.connect(self.match_worker.deleteLater)
         self.match_worker.start()
 
     def _on_match_result(self, idx, mi, nn):
@@ -2920,6 +2924,7 @@ class SortIQApp(QMainWindow):
         self._sub_worker = SubtitleWorker(self.files)
         self._sub_worker.status.connect(self._log)
         self._sub_worker.finished.connect(self._on_subs_finished)
+        self._sub_worker.finished.connect(self._sub_worker.deleteLater)
         self._sub_worker.start()
 
     def _on_subs_finished(self, fetched, total):
@@ -2956,6 +2961,7 @@ class SortIQApp(QMainWindow):
         self.worker.status.connect(self._log)
         self.worker.operation_complete.connect(self._on_op_complete)
         self.worker.finished.connect(self._rename_finished)
+        self.worker.finished.connect(self.worker.deleteLater)
         self.worker.start()
 
     def _on_op_complete(self, orig, new, mi):
@@ -3083,14 +3089,17 @@ class SortIQApp(QMainWindow):
 def main():
     # AppImage: set platform hints before QApplication is constructed so the
     # window manager can apply full decorations (minimize / maximize / close).
-    # Prefer xcb (X11) on X11 sessions; leave Wayland sessions untouched.
+    # Prefer Wayland when WAYLAND_DISPLAY is set (covers Fedora/GNOME Wayland
+    # sessions where DISPLAY is also set via XWayland). Fall back to xcb only
+    # on pure X11 sessions. Qt 6.5+ xcb requires libxcb-cursor which may not
+    # be installed; Wayland avoids that dependency entirely.
     if os.environ.get("APPIMAGE"):
         if not os.environ.get("QT_QPA_PLATFORM"):
             # Only override if not already set; respect user's choice.
-            if os.environ.get("WAYLAND_DISPLAY") and not os.environ.get("DISPLAY"):
+            if os.environ.get("WAYLAND_DISPLAY"):
                 os.environ["QT_QPA_PLATFORM"] = "wayland"
-            else:
-                os.environ.setdefault("QT_QPA_PLATFORM", "xcb")
+            elif os.environ.get("DISPLAY"):
+                os.environ["QT_QPA_PLATFORM"] = "xcb"
         # Disable DPI scaling quirks that can strip window decorations on HiDPI
         os.environ.setdefault("QT_AUTO_SCREEN_SCALE_FACTOR", "0")
 
