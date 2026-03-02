@@ -1,129 +1,213 @@
 """
 Metadata writer - writes metadata to video files.
 
-MP4/M4V: mutagen (embedded Python)
+MP4/M4V: mutagen (embedded Python library)
 MKV:     mkvpropedit CLI (mkvtoolnix package) — graceful fallback if not installed
+         Fedora/RHEL:   sudo dnf install mkvtoolnix
+         Debian/Ubuntu: sudo apt install mkvtoolnix
+         macOS:         brew install mkvtoolnix
+         Windows:       bundled with MKVToolNix installer
 """
 
 import os
 import shutil
 import subprocess
+import tempfile
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict, List, Optional
 
 try:
-    from mutagen.mp4 import MP4
-    from mutagen.mp4 import MP4Cover
+    from mutagen.mp4 import MP4, MP4Cover
     MUTAGEN_AVAILABLE = True
 except ImportError:
     MUTAGEN_AVAILABLE = False
-
-try:
-    import mutagen
-    MUTAGEN_GENERAL_AVAILABLE = True
-except ImportError:
-    MUTAGEN_GENERAL_AVAILABLE = False
 
 # mkvpropedit availability check (part of mkvtoolnix)
 _MKVPROPEDIT = shutil.which("mkvpropedit")
 
 
+def _iter_genre_names(genres) -> List[str]:
+    """Extract genre name strings from a genres value that may be a list[dict],
+    list[str], or comma-separated string."""
+    if not genres:
+        return []
+    if isinstance(genres, list):
+        names = []
+        for item in genres:
+            name = item.get("name", "") if isinstance(item, dict) else str(item)
+            if name.strip():
+                names.append(name.strip())
+        return names
+    if isinstance(genres, str):
+        return [p.strip() for p in genres.split(",") if p.strip()]
+    return []
+
+
+def _build_mkv_tags_xml(match_info: Dict) -> str:
+    """Build a Matroska XML tags string from a match_info dict.
+
+    The resulting file is passed to mkvpropedit via --tags all:<file>.
+    All fields are optional — returns empty string if nothing to write.
+    """
+    is_tv    = match_info.get("type") == "tv"
+    title    = match_info.get("title") or ""
+    year     = str(match_info.get("year") or "")
+    overview = match_info.get("overview") or ""
+
+    full_title = title
+    if is_tv and match_info.get("episode_title"):
+        full_title = f"{title} - {match_info['episode_title']}"
+    elif year and title:
+        full_title = f"{title} ({year})"
+
+    items: List[tuple] = []
+    if full_title:
+        items.append(("TITLE", full_title))
+    if year:
+        items.append(("DATE_RELEASED", year))
+    if overview:
+        items.append(("DESCRIPTION", overview))
+    items.append(("ORIGINAL_MEDIA_TYPE", "TV Show" if is_tv else "Movie"))
+    for name in _iter_genre_names(match_info.get("genres")):
+        items.append(("GENRE", name))
+    if is_tv:
+        if match_info.get("season") is not None:
+            items.append(("SEASON", str(match_info["season"])))
+        if match_info.get("episode") is not None:
+            items.append(("PART_NUMBER", str(match_info["episode"])))
+
+    if not items:
+        return ""
+
+    def _esc(s: str) -> str:
+        return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;")
+
+    lines = [
+        '<?xml version="1.0" encoding="UTF-8"?>',
+        '<!DOCTYPE Tags SYSTEM "matroskatags.dtd">',
+        "<Tags>",
+        "  <Tag>",
+        "    <Targets/>",
+    ]
+    for tag_name, tag_value in items:
+        lines.append(f"    <Simple><Name>{tag_name}</Name><String>{_esc(tag_value)}</String></Simple>")
+    lines += ["  </Tag>", "</Tags>"]
+    return "\n".join(lines)
+
+
 class MetadataWriter:
-    """Writes metadata to media files"""
-    
+    """Writes metadata to media files.
+
+    MP4/M4V — uses mutagen (pure Python).
+    MKV      — uses mkvpropedit CLI (mkvtoolnix); writes title, date, description,
+                genres, season/episode via an XML tags file, and optionally
+                attaches the poster as cover art.
+    """
+
     def __init__(self):
-        self.available = MUTAGEN_AVAILABLE or MUTAGEN_GENERAL_AVAILABLE
-        if not self.available:
-            print("Warning: mutagen not installed. Metadata writing disabled.")
-            print("Install with: pip install mutagen")
-    
-    def write_metadata(self, file_path: str, match_info: Dict, poster_path: Optional[str] = None) -> bool:
-        """Write metadata to file"""
-        if not self.available or not match_info:
+        self.mutagen_available = MUTAGEN_AVAILABLE
+        self.mkv_available     = bool(_MKVPROPEDIT)
+        self.available         = MUTAGEN_AVAILABLE or self.mkv_available
+
+        if not MUTAGEN_AVAILABLE:
+            print("Info: mutagen not installed — MP4/M4V metadata writing disabled. "
+                  "Install with: pip install mutagen")
+        if not _MKVPROPEDIT:
+            print("Info: mkvpropedit not found — MKV metadata writing disabled. "
+                  "Install mkvtoolnix (dnf/apt/brew install mkvtoolnix).")
+
+    def write_metadata(self, file_path: str, match_info: Dict,
+                       poster_path: Optional[str] = None) -> bool:
+        """Write metadata to *file_path* using match_info.
+
+        Returns True if metadata was written successfully.
+        For MP4/M4V: uses mutagen.  For MKV: uses mkvpropedit.
+        Other formats are silently skipped (returns False).
+        """
+        if not match_info:
             return False
-        
+
+        ext = Path(file_path).suffix.lower()
         try:
-            ext = Path(file_path).suffix.lower()
-            
-            if ext == '.mp4' or ext == '.m4v':
+            if ext in (".mp4", ".m4v"):
+                if not MUTAGEN_AVAILABLE:
+                    return False
                 return self._write_mp4_metadata(file_path, match_info, poster_path)
-            elif ext == '.mkv':
-                return self._write_mkv_metadata(file_path, match_info)
+            elif ext == ".mkv":
+                return self._write_mkv_metadata(file_path, match_info, poster_path)
             else:
                 return False
         except Exception as e:
-            print(f"Error writing metadata: {e}")
+            print(f"Error writing metadata to {file_path}: {e}")
             return False
-    
-    def _write_mp4_metadata(self, file_path: str, match_info: Dict, poster_path: Optional[str] = None) -> bool:
-        """Write metadata to MP4 file"""
-        if not MUTAGEN_AVAILABLE:
-            return False
-        
+
+    def _write_mp4_metadata(self, file_path: str, match_info: Dict,
+                             poster_path: Optional[str] = None) -> bool:
+        """Write metadata to an MP4/M4V file using mutagen."""
         try:
             video = MP4(file_path)
-            
-            # Title — mutagen MP4 tags require list values
-            if match_info.get('title'):
-                video['\xa9nam'] = [str(match_info['title'])]
 
-            # Year — must be a list of strings (ISO date or year string)
-            if match_info.get('year'):
-                video['\xa9day'] = [str(match_info['year'])]
+            # Title
+            if match_info.get("title"):
+                if match_info.get("type") == "tv" and match_info.get("episode_title"):
+                    title_str = f"{match_info['title']} - {match_info['episode_title']}"
+                else:
+                    title_str = str(match_info["title"])
+                video["\xa9nam"] = [title_str]
 
-            # Description/Plot
-            if match_info.get('overview'):
-                video['\xa9des'] = [str(match_info['overview'])]
+            # Year
+            if match_info.get("year"):
+                video["\xa9day"] = [str(match_info["year"])]
 
-            # Genre
-            if match_info.get('genres'):
-                video['\xa9gen'] = [str(match_info['genres'])]
+            # Description/plot
+            if match_info.get("overview"):
+                video["\xa9des"] = [str(match_info["overview"])]
 
-            # TV Show specific
-            if match_info.get('type') == 'tv':
-                if match_info.get('season') is not None:
-                    video['tvsn'] = [int(match_info['season'])]
-                if match_info.get('episode') is not None:
-                    video['tves'] = [int(match_info['episode'])]
-                if match_info.get('episode_title'):
-                    video['\xa9nam'] = [f"{match_info.get('title', '')} - {match_info['episode_title']}"]
-            
-            # Add poster/cover art
+            # Genre — TMDB returns list[dict]; join names to a single string
+            genre_names = _iter_genre_names(match_info.get("genres"))
+            if genre_names:
+                video["\xa9gen"] = [", ".join(genre_names)]
+
+            # TV-specific tags
+            if match_info.get("type") == "tv":
+                if match_info.get("season") is not None:
+                    video["tvsn"] = [int(match_info["season"])]
+                if match_info.get("episode") is not None:
+                    video["tves"] = [int(match_info["episode"])]
+
+            # Cover art
             if poster_path and os.path.exists(poster_path):
                 try:
-                    with open(poster_path, 'rb') as f:
+                    with open(poster_path, "rb") as f:
                         cover_data = f.read()
-                    video['covr'] = [MP4Cover(cover_data, imageformat=MP4Cover.FORMAT_JPEG)]
+                    video["covr"] = [MP4Cover(cover_data, imageformat=MP4Cover.FORMAT_JPEG)]
                 except Exception as e:
-                    print(f"Error adding cover art: {e}")
-            
+                    print(f"Warning: could not embed cover art: {e}")
+
             video.save()
             return True
         except Exception as e:
             print(f"Error writing MP4 metadata: {e}")
             return False
 
-    def _write_mkv_metadata(self, file_path: str, match_info: Dict) -> bool:
-        """Write title tag to an MKV file using mkvpropedit (mkvtoolnix).
+    def _write_mkv_metadata(self, file_path: str, match_info: Dict,
+                             poster_path: Optional[str] = None) -> bool:
+        """Write metadata to an MKV file using mkvpropedit (mkvtoolnix).
 
-        mkvpropedit is a lightweight CLI that modifies MKV headers without
-        re-encoding. It must be installed separately:
-          Fedora/RHEL:  dnf install mkvtoolnix
-          Debian/Ubuntu: apt install mkvtoolnix
-          macOS:        brew install mkvtoolnix
-          Windows:      bundled with MKVToolNix installer
+        Sets segment title + date via --edit info, writes a full XML tags file
+        with description, genres, and season/episode info, and optionally attaches
+        the poster image as embedded cover art.
         """
         if not _MKVPROPEDIT:
-            print(
-                "mkvpropedit not found — install mkvtoolnix to enable MKV metadata writing. "
-                "Fedora: sudo dnf install mkvtoolnix"
-            )
+            print("mkvpropedit not found — install mkvtoolnix to enable MKV metadata writing.")
             return False
 
-        title = match_info.get('title') or ""
-        year  = match_info.get('year') or ""
-        if match_info.get('type') == 'tv':
-            ep_title = match_info.get('episode_title') or ""
+        title = match_info.get("title") or ""
+        year  = str(match_info.get("year") or "")
+        is_tv = match_info.get("type") == "tv"
+
+        if is_tv:
+            ep_title  = match_info.get("episode_title") or ""
             title_tag = f"{title} - {ep_title}" if ep_title else title
         else:
             title_tag = f"{title} ({year})" if year else title
@@ -133,12 +217,32 @@ class MetadataWriter:
             "--edit", "info",
             "--set", f"title={title_tag}",
         ]
-
-        # Also set the date field if year is available
         if year:
             cmd += ["--set", f"date={year}-01-01T00:00:00+00:00"]
 
+        tags_file: Optional[str] = None
         try:
+            # Build and write the XML tags file
+            tags_xml = _build_mkv_tags_xml(match_info)
+            if tags_xml:
+                with tempfile.NamedTemporaryFile(
+                    mode="w", suffix=".xml", delete=False, encoding="utf-8"
+                ) as tf:
+                    tf.write(tags_xml)
+                    tags_file = tf.name
+                cmd += ["--tags", f"all:{tags_file}"]
+
+            # Attach poster as cover art (embedded in the MKV container)
+            if poster_path and os.path.exists(poster_path):
+                p_ext  = Path(poster_path).suffix.lower()
+                mime   = "image/jpeg" if p_ext in (".jpg", ".jpeg") else "image/png"
+                cover_name = "cover" + p_ext
+                cmd += [
+                    "--attachment-name", cover_name,
+                    "--attachment-mime-type", mime,
+                    "--add-attachment", poster_path,
+                ]
+
             result = subprocess.run(
                 cmd,
                 capture_output=True,
@@ -149,9 +253,13 @@ class MetadataWriter:
                 print(f"mkvpropedit error: {result.stderr.strip()}")
                 return False
             return True
+
         except subprocess.TimeoutExpired:
             print(f"mkvpropedit timed out for {file_path}")
             return False
         except Exception as e:
             print(f"Error writing MKV metadata: {e}")
             return False
+        finally:
+            if tags_file:
+                Path(tags_file).unlink(missing_ok=True)
