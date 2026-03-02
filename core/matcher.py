@@ -80,6 +80,11 @@ class MediaMatcher:
 
         self.media_info_extractor = MediaInfoExtractor() if MediaInfoExtractor else None
 
+        # Simple in-session TMDB result cache.
+        # Keys: ("movie", title, year), ("tv", title), ("episode", show_id, season, episode)
+        # Avoids re-querying TMDB for each episode of the same show in a batch.
+        self._cache: dict = {}
+
     # ── Public API ─────────────────────────────────────────────────────────────
 
     def match_file(
@@ -283,11 +288,54 @@ class MediaMatcher:
     def _match_tmdb(self, info: Dict) -> Optional[Dict]:
         return self._match_tmdb_tv(info) if info["is_tv"] else self._match_tmdb_movie(info)
 
+    def search_by_imdb_id(self, imdb_id: str) -> Optional[Dict]:
+        """Resolve an IMDb ID (tt1234567) to a TMDB match via /find."""
+        if _is_unconfigured(self.tmdb_api_key):
+            return None
+        cache_key = ("imdb", imdb_id)
+        if cache_key in self._cache:
+            return self._cache[cache_key]
+        try:
+            data = self._get(
+                f"{self.tmdb_base_url}/find/{imdb_id}",
+                {"api_key": self.tmdb_api_key, "external_source": "imdb_id"},
+            )
+            movie_results = data.get("movie_results", [])
+            tv_results    = data.get("tv_results", [])
+            result = None
+            if movie_results:
+                m = movie_results[0]
+                result = {
+                    "title":    m.get("title"),
+                    "year":     (m.get("release_date") or "")[:4] or None,
+                    "tmdb_id":  m.get("id"),
+                    "type":     "movie",
+                    "overview": m.get("overview", ""),
+                }
+            elif tv_results:
+                t = tv_results[0]
+                result = {
+                    "title":    t.get("name"),
+                    "year":     (t.get("first_air_date") or "")[:4] or None,
+                    "tmdb_id":  t.get("id"),
+                    "type":     "tv",
+                    "overview": t.get("overview", ""),
+                }
+            self._cache[cache_key] = result
+            return result
+        except Exception as exc:
+            log.warning("search_by_imdb_id(%r): %s", imdb_id, exc)
+            return None
+
     def _match_tmdb_movie(self, info: Dict) -> Optional[Dict]:
         if _is_unconfigured(self.tmdb_api_key):
             raise ValueError(
                 "TMDB API key is not set. Open Settings and paste your key."
             )
+
+        cache_key = ("movie", info["title"], info.get("year"))
+        if cache_key in self._cache:
+            return self._cache[cache_key]
 
         params: Dict = {"api_key": self.tmdb_api_key, "query": info["title"]}
         if info.get("year"):
@@ -303,16 +351,19 @@ class MediaMatcher:
             results = data.get("results", [])
 
         if not results:
+            self._cache[cache_key] = None
             return None
 
         movie = results[0]
-        return {
+        result = {
             "title":    movie.get("title"),
             "year":     (movie.get("release_date") or "")[:4] or None,
             "tmdb_id":  movie.get("id"),
             "type":     "movie",
             "overview": movie.get("overview", ""),
         }
+        self._cache[cache_key] = result
+        return result
 
     def _match_tmdb_tv(self, info: Dict) -> Optional[Dict]:
         if _is_unconfigured(self.tmdb_api_key):
@@ -320,15 +371,23 @@ class MediaMatcher:
                 "TMDB API key is not set. Open Settings and paste your key."
             )
 
-        data = self._get(
-            f"{self.tmdb_base_url}/search/tv",
-            {"api_key": self.tmdb_api_key, "query": info["title"]},
-        )
-        results = data.get("results", [])
-        if not results:
-            return None
+        show_cache_key = ("tv_show", info["title"])
+        if show_cache_key in self._cache:
+            show = self._cache[show_cache_key]
+            if show is None:
+                return None
+        else:
+            data = self._get(
+                f"{self.tmdb_base_url}/search/tv",
+                {"api_key": self.tmdb_api_key, "query": info["title"]},
+            )
+            results = data.get("results", [])
+            if not results:
+                self._cache[show_cache_key] = None
+                return None
+            show = results[0]
+            self._cache[show_cache_key] = show
 
-        show     = results[0]
         show_id  = show.get("id")
         season   = info.get("season")
         episodes = info.get("episodes")   # list for multi-ep, else None
@@ -362,12 +421,18 @@ class MediaMatcher:
     ) -> Optional[Dict]:
         if not (show_id and season and episode):
             return None
+        cache_key = ("episode", show_id, season, episode)
+        if cache_key in self._cache:
+            return self._cache[cache_key]
         try:
-            return self._get(
+            result = self._get(
                 f"{self.tmdb_base_url}/tv/{show_id}/season/{season}/episode/{episode}",
                 {"api_key": self.tmdb_api_key},
             )
+            self._cache[cache_key] = result
+            return result
         except Exception:
+            self._cache[cache_key] = None
             return None
 
     def _match_tvdb(self, info: Dict) -> Optional[Dict]:

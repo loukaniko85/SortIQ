@@ -109,12 +109,17 @@ class FileRenamer:
         match_info: Dict,
         output_dir: Optional[str] = None,
         operation: str = "move",
+        on_conflict: str = "skip",
     ) -> str:
         """
         Rename (or copy) a file using match_info.
 
+        on_conflict: "skip"      — raise FileExistsError if destination exists
+                     "overwrite" — replace the existing file
+                     "suffix"    — add (1), (2)… to make the name unique
+
         Returns the destination path.
-        Raises FileExistsError if the destination already exists.
+        Raises FileExistsError for on_conflict="skip" when destination exists.
         """
         if not match_info:
             raise ValueError("match_info is required")
@@ -125,7 +130,11 @@ class FileRenamer:
         dest.parent.mkdir(parents=True, exist_ok=True)
 
         if dest.exists() and dest != Path(file_path):
-            raise FileExistsError(f"Destination already exists: {dest}")
+            if on_conflict == "skip":
+                raise FileExistsError(f"Destination already exists: {dest}")
+            elif on_conflict == "suffix":
+                dest = _unique_dest(dest)
+            # on_conflict == "overwrite": fall through and replace
 
         if operation == "copy":
             shutil.copy2(file_path, str(dest))
@@ -133,3 +142,16 @@ class FileRenamer:
             shutil.move(file_path, str(dest))
 
         return str(dest)
+
+
+def _unique_dest(dest: Path) -> Path:
+    """Return a non-conflicting path by appending (1), (2)… before the extension."""
+    stem   = dest.stem
+    suffix = dest.suffix
+    parent = dest.parent
+    i = 1
+    while True:
+        candidate = parent / f"{stem} ({i}){suffix}"
+        if not candidate.exists():
+            return candidate
+        i += 1

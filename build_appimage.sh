@@ -218,14 +218,12 @@ _SITE="\${APPDIR}/opt/python${PYTHON_VERSION}/lib/python${PYTHON_VERSION}/site-p
 export LD_LIBRARY_PATH="\${APPDIR}/usr/lib:\${LD_LIBRARY_PATH}"
 export APPIMAGE="\${APPIMAGE:-appimage}"
 
-# Disable D-Bus portal for file dialogs.
-# Setting DBUS_SESSION_BUS_ADDRESS to an unreachable path causes Qt to fail
-# fast rather than hanging trying to connect to the portal.
-# GTK_USE_PORTAL=0 stops QFileDialog using the portal path.
-# Do NOT clear XDG_CURRENT_DESKTOP — it breaks window manager decorations
-# (minimize/maximize/close buttons disappear).
-export DBUS_SESSION_BUS_ADDRESS="unix:path=/dev/null/nosuchsocket"
-export QT_NO_GLIB=1
+# Keep D-Bus alive so GNOME's xdg-decoration protocol can apply window
+# buttons (minimize/maximize/close). Previously we killed D-Bus here to
+# prevent Qt's Wayland portal file dialog from hanging — that side-effect
+# also broke window decorations. The portal dialog freeze is now prevented
+# in main.py by setting QT_QPA_PLATFORMTHEME="" before QApplication, which
+# forces Qt's own built-in file picker instead of the D-Bus portal one.
 export NO_AT_BRIDGE=1
 export GTK_USE_PORTAL=0
 export GIO_USE_VFS=local

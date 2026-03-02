@@ -319,9 +319,10 @@ class SubtitleWorker(QThread):
     status   = pyqtSignal(str)
     finished = pyqtSignal(int, int)  # (fetched, total)
 
-    def __init__(self, files):
+    def __init__(self, files, language="en"):
         super().__init__()
-        self.files = files
+        self.files    = files
+        self.language = language
 
     def run(self):
         fetcher = SubtitleFetcher()
@@ -329,7 +330,7 @@ class SubtitleWorker(QThread):
         total   = len(self.files)
         for fp in self.files:
             try:
-                sub = fetcher.fetch_subtitle(fp)
+                sub = fetcher.fetch_subtitle(fp, language=self.language)
                 if sub:
                     fetched += 1
                     self.status.emit(f"\u2b07  {os.path.basename(sub)}")
@@ -349,12 +350,14 @@ class RenameWorker(QThread):
     def __init__(self, files, matches, output_dir, naming_scheme,
                  download_artwork=False, write_metadata=False,
                  dry_run=False, copy_mode=False,
-                 write_nfo=False, download_fanart=False):
+                 write_nfo=False, download_fanart=False,
+                 on_conflict="skip"):
         super().__init__()
         self.files=files; self.matches=matches; self.output_dir=output_dir
         self.naming_scheme=naming_scheme; self.download_artwork=download_artwork
         self.write_metadata=write_metadata; self.dry_run=dry_run; self.copy_mode=copy_mode
         self.write_nfo=write_nfo; self.download_fanart=download_fanart
+        self.on_conflict=on_conflict
 
     def run(self):
         try:
@@ -380,10 +383,18 @@ class RenameWorker(QThread):
                 dest.parent.mkdir(parents=True, exist_ok=True)
 
                 if dest.exists() and dest != Path(fp):
-                    conflicts += 1
-                    self.status.emit(f"\u26a0  [{mode_label}] Conflict — destination exists: {dest.name}")
-                    self.progress.emit(int((i+1)/total*100))
-                    continue
+                    if self.on_conflict == "skip":
+                        conflicts += 1
+                        self.status.emit(f"\u26a0  [{mode_label}] Conflict skipped — exists: {dest.name}")
+                        self.progress.emit(int((i+1)/total*100))
+                        continue
+                    elif self.on_conflict == "suffix":
+                        # Make unique: add (1), (2)… before extension
+                        stem = dest.stem; sfx = dest.suffix; parent = dest.parent
+                        n = 1
+                        while dest.exists() and dest != Path(fp):
+                            dest = parent / f"{stem} ({n}){sfx}"; n += 1
+                    # on_conflict == "overwrite": fall through
 
                 if self.dry_run:
                     self.status.emit(f"\u25b6  [DRY RUN] {os.path.basename(fp)} \u2192 {dest.name}")
@@ -996,13 +1007,17 @@ class BatchJobsDialog(QDialog):
             self._job_log.setPlainText(f"Could not fetch log: {e}")
 
     def _browse_dir(self):
-        d = QFileDialog.getExistingDirectory(self, "Select Directory to Process")
+        d = QFileDialog.getExistingDirectory(
+            self, "Select Directory to Process", "",
+            QFileDialog.Option.ShowDirsOnly | QFileDialog.Option.DontUseNativeDialog)
         if d:
             cur = self._paths_edit.toPlainText().strip()
             self._paths_edit.setPlainText((cur + "\n" + d).strip())
 
     def _browse_out(self):
-        d = QFileDialog.getExistingDirectory(self, "Select Output Directory")
+        d = QFileDialog.getExistingDirectory(
+            self, "Select Output Directory", "",
+            QFileDialog.Option.ShowDirsOnly | QFileDialog.Option.DontUseNativeDialog)
         if d: self._outdir_edit.setText(d)
 
     def _submit_job(self):
@@ -1160,7 +1175,9 @@ class DuplicateFinderDialog(QDialog):
         v.addLayout(foot)
 
     def _browse(self):
-        d = QFileDialog.getExistingDirectory(self, "Select Directory to Scan")
+        d = QFileDialog.getExistingDirectory(
+            self, "Select Directory to Scan", "",
+            QFileDialog.Option.ShowDirsOnly | QFileDialog.Option.DontUseNativeDialog)
         if d:
             self._dir_edit.setText(d)
 
@@ -1695,7 +1712,9 @@ class SonarrRadarrDialog(QDialog):
     def _export_csv(self):
         if not self._results:
             QMessageBox.information(self, "No Data", "Fetch data first."); return
-        path, _ = QFileDialog.getSaveFileName(self, "Export CSV", "wanted.csv", "CSV (*.csv)")
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Export CSV", "wanted.csv", "CSV (*.csv)",
+            options=QFileDialog.Option.DontUseNativeDialog)
         if not path:
             return
         import csv
@@ -2181,7 +2200,9 @@ class WatchFolderDialog(QDialog):
         v.addLayout(foot)
 
     def _browse(self):
-        d = QFileDialog.getExistingDirectory(self, "Select Folder to Watch")
+        d = QFileDialog.getExistingDirectory(
+            self, "Select Folder to Watch", "",
+            QFileDialog.Option.ShowDirsOnly | QFileDialog.Option.DontUseNativeDialog)
         if d:
             self._dir_edit.setText(d)
 
@@ -2213,10 +2234,18 @@ class WatchFolderDialog(QDialog):
 
     def _on_dir_changed(self, path):
         VIDEO_EXT = {".mp4", ".mkv", ".avi", ".mov", ".m4v", ".wmv", ".flv", ".webm"}
+        # Suffixes used by browsers/downloaders for in-progress transfers — skip these
+        # so half-written files are not queued for matching.
+        PARTIAL_EXT = {".part", ".crdownload", ".tmp", ".download", ".partial", ".!ut"}
         new_files = []
         try:
             for f in os.listdir(path):
-                if Path(f).suffix.lower() in VIDEO_EXT:
+                p = Path(f)
+                # Skip known partial-download extensions entirely
+                if p.suffix.lower() in PARTIAL_EXT:
+                    continue
+                # Also skip files whose stem ends with a partial marker
+                if p.suffix.lower() in VIDEO_EXT:
                     fp = os.path.join(path, f)
                     if os.path.isfile(fp) and fp not in self._known_files:
                         new_files.append(fp)
@@ -2291,6 +2320,11 @@ class SortIQApp(QMainWindow):
         self.data_source_combo = QComboBox()
         self.data_source_combo.addItems(["TheMovieDB","TheTVDB","AniDB"])
         self.data_source_combo.setFixedWidth(120)
+        self.data_source_combo.setToolTip(
+            "TheMovieDB — fully supported\n"
+            "TheTVDB / AniDB — uses TheMovieDB as backend (native integration coming)"
+        )
+        self.data_source_combo.currentTextChanged.connect(self._on_source_changed)
         h.addWidget(self.data_source_combo)
 
         lang_lbl = QLabel("Lang")
@@ -2489,7 +2523,7 @@ class SortIQApp(QMainWindow):
         opt.addStretch()
         v.addLayout(opt)
 
-        # Copy vs Move
+        # Copy vs Move + conflict resolution
         mode_row = QHBoxLayout(); mode_row.setSpacing(16)
         mode_lbl = QLabel("File operation:")
         mode_lbl.setStyleSheet(f"color:{C_TEXT_DIM}; font-size:11px;")
@@ -2503,12 +2537,36 @@ class SortIQApp(QMainWindow):
         mode_row.addWidget(self.move_radio)
         mode_row.addWidget(self.copy_radio)
         mode_row.addStretch()
+
+        conflict_lbl = QLabel("On conflict:")
+        conflict_lbl.setStyleSheet(f"color:{C_TEXT_DIM}; font-size:11px;")
+        self.conflict_combo = QComboBox()
+        self.conflict_combo.addItems(["Skip (keep existing)", "Rename with suffix", "Overwrite"])
+        self.conflict_combo.setFixedWidth(160)
+        self.conflict_combo.setToolTip(
+            "Skip — leave existing file untouched (default)\n"
+            "Rename with suffix — add (1), (2)… to make unique\n"
+            "Overwrite — replace the existing file"
+        )
+        mode_row.addWidget(conflict_lbl)
+        mode_row.addWidget(self.conflict_combo)
         v.addLayout(mode_row)
 
         # Preview list
         pr = QHBoxLayout()
         pvl = QLabel("RENAMED PREVIEW"); pvl.setObjectName("section_title"); pr.addWidget(pvl)
         pr.addStretch()
+
+        # Subtitle language selector (separate from metadata language)
+        sub_lang_lbl = QLabel("Sub lang:")
+        sub_lang_lbl.setStyleSheet(f"color:{C_TEXT_DIM}; font-size:10px;")
+        pr.addWidget(sub_lang_lbl)
+        self.sub_lang_combo = QComboBox()
+        self.sub_lang_combo.addItems(["en","fr","de","es","it","ja","ko","zh","pt","ru","nl","pl","sv","da","fi","nb"])
+        self.sub_lang_combo.setFixedWidth(52)
+        self.sub_lang_combo.setToolTip("Subtitle language to fetch from OpenSubtitles (ISO 639-1)")
+        pr.addWidget(self.sub_lang_combo)
+
         self.fetch_subs_btn = QPushButton("\u2b07 Subtitles")
         self.fetch_subs_btn.setObjectName("ghost"); self.fetch_subs_btn.setFixedHeight(26)
         self.fetch_subs_btn.clicked.connect(self.fetch_subtitles)
@@ -2534,8 +2592,14 @@ class SortIQApp(QMainWindow):
         ar = QHBoxLayout(); ar.setSpacing(8)
         self.undo_btn = QPushButton("\u21a9 Undo"); self.undo_btn.setObjectName("ghost"); self.undo_btn.setFixedHeight(36)
         self.undo_btn.clicked.connect(self.undo_rename); self.undo_btn.setEnabled(self.history.can_undo())
+        self.undo_btn.setToolTip("Undo last rename  (Ctrl+Z)")
         self.redo_btn = QPushButton("\u21aa Redo"); self.redo_btn.setObjectName("ghost"); self.redo_btn.setFixedHeight(36)
         self.redo_btn.clicked.connect(self.redo_rename); self.redo_btn.setEnabled(self.history.can_redo())
+        self.redo_btn.setToolTip("Redo last undo  (Ctrl+Y)")
+        self.undo_batch_btn = QPushButton("\u21ba Undo Batch"); self.undo_batch_btn.setObjectName("ghost")
+        self.undo_batch_btn.setFixedHeight(36); self.undo_batch_btn.setEnabled(False)
+        self.undo_batch_btn.clicked.connect(self.undo_batch)
+        self.undo_batch_btn.setToolTip("Undo all renames from the last Rename run")
 
         # Rename button — GREEN
         self.rename_btn = QPushButton("\u25b6  Rename Files")
@@ -2543,8 +2607,9 @@ class SortIQApp(QMainWindow):
         self.rename_btn.setFixedHeight(44)
         self.rename_btn.setEnabled(False)
         self.rename_btn.clicked.connect(self.rename_files)
+        self.rename_btn.setToolTip("Rename matched files  (Ctrl+R)")
 
-        ar.addWidget(self.undo_btn); ar.addWidget(self.redo_btn)
+        ar.addWidget(self.undo_btn); ar.addWidget(self.redo_btn); ar.addWidget(self.undo_batch_btn)
         ar.addStretch()
         ar.addWidget(self.rename_btn)
         v.addLayout(ar)
@@ -2558,6 +2623,9 @@ class SortIQApp(QMainWindow):
         row = QHBoxLayout()
         fl = QLabel("ACTIVITY LOG"); fl.setObjectName("section_title"); row.addWidget(fl)
         row.addStretch()
+        exp = QPushButton("Export"); exp.setObjectName("icon_btn"); exp.setFixedHeight(22)
+        exp.setToolTip("Save activity log to a text file")
+        exp.clicked.connect(self._export_log); row.addWidget(exp)
         clr = QPushButton("Clear"); clr.setObjectName("icon_btn"); clr.setFixedHeight(22)
         clr.clicked.connect(lambda: self.status_text.clear()); row.addWidget(clr)
         v.addLayout(row)
@@ -2595,6 +2663,18 @@ class SortIQApp(QMainWindow):
         idx = self.new_names_list.indexAt(pos).row()
         if idx < 0 or idx >= len(self.files): return
         menu = QMenu(self)
+
+        # "Show in folder" — opens the renamed output folder if the file has
+        # already been processed, otherwise falls back to the source folder.
+        fp = self.files[idx]
+        rename_dests = getattr(self, '_rename_dests', {})
+        show_path = rename_dests.get(fp, fp)
+        folder = str(Path(show_path).parent)
+        show_act = QAction("\U0001f4c2  Show in folder", self)
+        show_act.triggered.connect(lambda _=None, f=folder: self._xdg_open(f))
+        menu.addAction(show_act)
+        menu.addSeparator()
+
         rematch_act = QAction("\U0001f50d  Search manually for this file", self)
         rematch_act.triggered.connect(lambda: self._manual_search(idx))
         menu.addAction(rematch_act)
@@ -2603,17 +2683,20 @@ class SortIQApp(QMainWindow):
         menu.addAction(clear_act)
         menu.exec(self.new_names_list.mapToGlobal(pos))
 
+    def _xdg_open(self, path: str):
+        """Open *path* in the system file manager (cross-platform)."""
+        import subprocess, sys
+        if sys.platform == "darwin":
+            subprocess.run(["open", path])
+        elif sys.platform == "win32":
+            subprocess.run(["explorer", path])
+        else:
+            subprocess.run(["xdg-open", path])
+
     def _open_folder(self, item):
         idx = self.original_list.row(item)
         if 0 <= idx < len(self.files):
-            folder = str(Path(self.files[idx]).parent)
-            import subprocess, sys
-            if sys.platform == "darwin":
-                subprocess.run(["open", folder])
-            elif sys.platform == "win32":
-                subprocess.run(["explorer", folder])
-            else:
-                subprocess.run(["xdg-open", folder])
+            self._xdg_open(str(Path(self.files[idx]).parent))
 
     def _manual_search(self, idx):
         """Let user type a manual search query for a specific file."""
@@ -2625,15 +2708,24 @@ class SortIQApp(QMainWindow):
         )
         if not ok or not query.strip(): return
 
-        # Simple search — strip year from end if provided
         import re
-        parts = query.strip().rsplit(None, 1)
-        year = None
-        title = query.strip()
-        if len(parts) == 2 and re.match(r'^\d{4}$', parts[1]):
-            title = parts[0]; year = int(parts[1])
+        q = query.strip()
 
-        results = self.matcher.search_movies(title, year) or self.matcher.search_tv_shows(title)
+        # IMDb ID shortcut — tt followed by digits
+        if re.match(r'^tt\d+$', q, re.IGNORECASE):
+            result = self.matcher.search_by_imdb_id(q)
+            if not result:
+                QMessageBox.information(self, "No Results", f"No TMDB match found for IMDb ID '{q}'.")
+                return
+            results = [result]
+        else:
+            # Simple search — strip year from end if provided
+            parts = q.rsplit(None, 1)
+            year = None
+            title = q
+            if len(parts) == 2 and re.match(r'^\d{4}$', parts[1]):
+                title = parts[0]; year = int(parts[1])
+            results = self.matcher.search_movies(title, year) or self.matcher.search_tv_shows(title)
         if not results:
             QMessageBox.information(self, "No Results", f"No results found for '{query}'.")
             return
@@ -2670,12 +2762,16 @@ class SortIQApp(QMainWindow):
 
     # ── File management ───────────────────────────────────────────
     def add_files(self):
-        files, _ = QFileDialog.getOpenFileNames(self,"Select Media Files","",
-            "Video Files (*.mp4 *.mkv *.avi *.mov *.m4v *.mpg *.mpeg *.flv *.wmv);;All Files (*)")
+        files, _ = QFileDialog.getOpenFileNames(
+            self, "Select Media Files", "",
+            "Video Files (*.mp4 *.mkv *.avi *.mov *.m4v *.mpg *.mpeg *.flv *.wmv);;All Files (*)",
+            options=QFileDialog.Option.DontUseNativeDialog)
         if files: self.add_files_list(files)
 
     def add_folder(self):
-        folder = QFileDialog.getExistingDirectory(self, "Select Folder")
+        folder = QFileDialog.getExistingDirectory(
+            self, "Select Folder", "",
+            QFileDialog.Option.ShowDirsOnly | QFileDialog.Option.DontUseNativeDialog)
         if not folder: return
         self._log(f"\u27f3  Scanning folder: {os.path.basename(folder)}\u2026")
         self._scan_worker = FolderScanWorker([folder])
@@ -2756,7 +2852,9 @@ class SortIQApp(QMainWindow):
         self._refresh_ui(); self._log("\u2014 List cleared")
 
     def browse_output_dir(self):
-        d = QFileDialog.getExistingDirectory(self,"Select Output Directory")
+        d = QFileDialog.getExistingDirectory(
+            self, "Select Output Directory", "",
+            QFileDialog.Option.ShowDirsOnly | QFileDialog.Option.DontUseNativeDialog)
         if d: self.output_dir_input.setText(d)
 
     def _open_duplicates(self):
@@ -2767,6 +2865,17 @@ class SortIQApp(QMainWindow):
         dlg = WatchFolderDialog(self)
         dlg.files_detected.connect(self.add_files_list)
         dlg.exec()
+
+    def _on_source_changed(self, source: str):
+        """Show an info message when user picks TVDB or AniDB (both use TMDB backend)."""
+        if source in ("TheTVDB", "AniDB"):
+            QMessageBox.information(
+                self,
+                f"{source} — Note",
+                f"{source} is listed as a source option but currently uses TheMovieDB as its\n"
+                "matching backend. Native integration is planned for a future release.\n\n"
+                "Your match results will still be correct — TMDB covers the same catalogue.",
+            )
 
     def _open_sonarr_radarr(self):
         dlg = SonarrRadarrDialog(self)
@@ -2919,9 +3028,10 @@ class SortIQApp(QMainWindow):
     def fetch_subtitles(self):
         if not self.files:
             QMessageBox.warning(self, "No Files", "Please add files first."); return
-        self._log("\u27f3  Fetching subtitles\u2026")
+        lang = self.sub_lang_combo.currentText()
+        self._log(f"\u27f3  Fetching subtitles ({lang})\u2026")
         self.fetch_subs_btn.setEnabled(False)
-        self._sub_worker = SubtitleWorker(self.files)
+        self._sub_worker = SubtitleWorker(self.files, language=lang)
         self._sub_worker.status.connect(self._log)
         self._sub_worker.finished.connect(self._on_subs_finished)
         self._sub_worker.finished.connect(self._sub_worker.deleteLater)
@@ -2947,6 +3057,12 @@ class SortIQApp(QMainWindow):
 
         self.progress_bar.setVisible(True); self.progress_bar.setValue(0)
         self.rename_btn.setEnabled(False); self.match_btn.setEnabled(False)
+        # Record history position so "Undo Batch" can revert all ops in this run
+        self._batch_start_op_idx = self.history.current_index
+
+        conflict_map = {"Skip (keep existing)": "skip", "Overwrite": "overwrite", "Rename with suffix": "suffix"}
+        on_conflict = conflict_map.get(self.conflict_combo.currentText(), "skip")
+
         self.worker = RenameWorker(
             self.files, self.matches,
             self.output_dir_input.text().strip() or None,
@@ -2956,7 +3072,8 @@ class SortIQApp(QMainWindow):
             dry_run=dry_run,
             copy_mode=copy_mode,
             write_nfo=self.write_nfo_check.isChecked(),
-            download_fanart=self.download_fanart_check.isChecked())
+            download_fanart=self.download_fanart_check.isChecked(),
+            on_conflict=on_conflict)
         self.worker.progress.connect(self.progress_bar.setValue)
         self.worker.status.connect(self._log)
         self.worker.operation_complete.connect(self._on_op_complete)
@@ -2966,12 +3083,57 @@ class SortIQApp(QMainWindow):
 
     def _on_op_complete(self, orig, new, mi):
         self.history.add_operation(orig, new, mi); self._update_undo_redo()
+        # Track rename destinations so "Show in folder" can open the output folder
+        if not hasattr(self, '_rename_dests'):
+            self._rename_dests = {}
+        self._rename_dests[orig] = new
 
     def _rename_finished(self, ok, msg):
         self.progress_bar.setVisible(False)
         self.rename_btn.setEnabled(True); self.match_btn.setEnabled(True)
         self._log(("\u2713  " if ok else "\u2717  ") + msg); self._update_undo_redo()
-        if not ok: QMessageBox.critical(self,"Rename Error",msg)
+        if not ok:
+            QMessageBox.critical(self, "Rename Error", msg)
+            return
+
+        # Enable Undo Batch if any ops were recorded in this run
+        ops_this_batch = self.history.current_index - getattr(self, '_batch_start_op_idx', self.history.current_index)
+        self.undo_batch_btn.setEnabled(ops_this_batch > 0)
+
+        # Offer Sonarr/Radarr library refresh if configured and not a dry run
+        if not self.dry_run_check.isChecked() and ok:
+            settings = load_settings()
+            sonarr_url = settings.get("sonarr_url", "").strip()
+            radarr_url = settings.get("radarr_url", "").strip()
+            has_tv     = any(m and m.get("type") == "tv"    for m in self.matches if m)
+            has_movie  = any(m and m.get("type") == "movie" for m in self.matches if m)
+            arr_targets = []
+            if has_tv    and sonarr_url: arr_targets.append(("Sonarr", sonarr_url, settings.get("sonarr_api_key", "")))
+            if has_movie and radarr_url: arr_targets.append(("Radarr", radarr_url, settings.get("radarr_api_key", "")))
+            if arr_targets:
+                names = " & ".join(t[0] for t in arr_targets)
+                reply = QMessageBox.question(self, "Refresh Library?",
+                    f"Trigger library scan in {names}?",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                    QMessageBox.StandardButton.Yes)
+                if reply == QMessageBox.StandardButton.Yes:
+                    self._trigger_arr_refresh(arr_targets)
+
+    def _trigger_arr_refresh(self, arr_targets):
+        """POST a RescanMovie / RefreshSeries command to Sonarr/Radarr."""
+        import urllib.request, urllib.error
+        for name, base_url, api_key in arr_targets:
+            try:
+                url     = base_url.rstrip("/") + "/api/v3/command"
+                command = "RescanMovie" if name == "Radarr" else "RefreshSeries"
+                body    = json.dumps({"name": command}).encode()
+                req     = urllib.request.Request(url, data=body, method="POST")
+                req.add_header("X-Api-Key", api_key)
+                req.add_header("Content-Type", "application/json")
+                with urllib.request.urlopen(req, timeout=8):
+                    self._log(f"\u2713  {name} library scan triggered")
+            except Exception as exc:
+                self._log(f"\u26a0  {name} refresh failed: {exc}")
 
     # ── Undo / Redo ───────────────────────────────────────────────
     def _update_undo_redo(self):
@@ -3018,6 +3180,47 @@ class SortIQApp(QMainWindow):
             self.history._save_history()
             QMessageBox.critical(self, "Error", f"Redo failed: {e}")
         self._update_undo_redo()
+
+    def undo_batch(self):
+        """Undo all rename operations performed in the last Rename run."""
+        target_idx = getattr(self, '_batch_start_op_idx', None)
+        if target_idx is None or self.history.current_index <= target_idx:
+            self.undo_batch_btn.setEnabled(False)
+            return
+        ops_to_undo = self.history.current_index - target_idx
+        failed = 0
+        for _ in range(ops_to_undo):
+            op = self.history.undo()
+            if not op:
+                break
+            src, dst = op['new_path'], op['original_path']
+            if not os.path.exists(src):
+                self.history.current_index += 1
+                self.history._save_history()
+                failed += 1
+                continue
+            try:
+                shutil.move(src, dst)
+                self._log(f"\u21a9  Batch undo: {os.path.basename(src)}")
+            except Exception as e:
+                self.history.current_index += 1
+                self.history._save_history()
+                self._log(f"\u26a0  Batch undo failed: {os.path.basename(src)} — {e}")
+                failed += 1
+        self._update_undo_redo()
+        self.undo_batch_btn.setEnabled(False)
+        self._log(f"\u2713  Batch undo complete ({ops_to_undo - failed} reversed{', ' + str(failed) + ' failed' if failed else ''})")
+
+    # ── Log export ────────────────────────────────────────────────
+    def _export_log(self):
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Export Activity Log",
+            str(Path.home() / "sortiq_log.txt"),
+            "Text Files (*.txt)",
+            options=QFileDialog.Option.DontUseNativeDialog)
+        if path:
+            Path(path).write_text(self.status_text.toPlainText(), encoding="utf-8")
+            self._log(f"\u2713  Log exported to {path}")
 
     # ── Presets ───────────────────────────────────────────────────
     def load_preset(self, name):
@@ -3079,6 +3282,38 @@ class SortIQApp(QMainWindow):
             self.preset_combo.clear(); self.preset_combo.addItems(self.preset_manager.list_presets())
             self.preset_combo.setCurrentText(name); self._log(f"\u2713  Preset saved: {name}")
 
+    # ── Keyboard shortcuts ────────────────────────────────────────
+    def keyPressEvent(self, event):
+        mods = event.modifiers()
+        key  = event.key()
+        Ctrl = Qt.KeyboardModifier.ControlModifier
+        if mods == Ctrl:
+            if key == Qt.Key.Key_Z:
+                if self.history.can_undo(): self.undo_rename()
+                return
+            if key == Qt.Key.Key_Y:
+                if self.history.can_redo(): self.redo_rename()
+                return
+            if key == Qt.Key.Key_R:
+                if self.rename_btn.isEnabled(): self.rename_files()
+                return
+            if key == Qt.Key.Key_M:
+                if self.match_btn.isEnabled(): self.match_files()
+                return
+            if key == Qt.Key.Key_Comma:
+                self._open_settings()
+                return
+        if key == Qt.Key.Key_Delete:
+            if self.original_list.hasFocus():
+                self.remove_selected()
+            return
+        if key == Qt.Key.Key_Escape:
+            if hasattr(self, 'match_worker'):
+                self.match_worker.stop()
+                self._log("\u23f9  Match cancelled by user")
+            return
+        super().keyPressEvent(event)
+
     def _log(self, msg):
         self.status_text.append(msg)
         self.status_text.verticalScrollBar().setValue(self.status_text.verticalScrollBar().maximum())
@@ -3102,6 +3337,13 @@ def main():
                 os.environ["QT_QPA_PLATFORM"] = "xcb"
         # Disable DPI scaling quirks that can strip window decorations on HiDPI
         os.environ.setdefault("QT_AUTO_SCREEN_SCALE_FACTOR", "0")
+        # Prevent Qt from loading qgnomeplatform/portal theme.
+        # The portal file dialog (org.freedesktop.portal.FileChooser) sends a
+        # D-Bus request that can hang indefinitely in an AppImage environment.
+        # Clearing the platform theme forces Qt's own built-in file picker,
+        # which needs no D-Bus. D-Bus itself stays alive so GNOME's
+        # xdg-decoration protocol can apply window buttons (min/max/close).
+        os.environ.setdefault("QT_QPA_PLATFORMTHEME", "")
 
     app = QApplication(sys.argv)
     app.setApplicationName("SortIQ")

@@ -58,9 +58,8 @@ class MediaInfoExtractor:
                             info['vf'] = f"{height}p"
                     
                     # Video codec
-                    codec = track.codec_id or track.codec
+                    codec = track.codec_id or track.codec or track.format or ""
                     if codec:
-                        # Normalize codec names
                         codec_upper = codec.upper()
                         if 'AVC' in codec_upper or 'H264' in codec_upper or 'X264' in codec_upper:
                             info['vc'] = 'AVC'
@@ -68,15 +67,21 @@ class MediaInfoExtractor:
                         elif 'HEVC' in codec_upper or 'H265' in codec_upper or 'X265' in codec_upper:
                             info['vc'] = 'HEVC'
                             info['video_codec'] = 'HEVC'
-                        elif 'MPEG' in codec_upper:
-                            info['vc'] = 'MPEG'
-                            info['video_codec'] = 'MPEG'
+                        elif 'AV1' in codec_upper or 'AOM' in codec_upper:
+                            info['vc'] = 'AV1'
+                            info['video_codec'] = 'AV1'
                         elif 'VP9' in codec_upper:
                             info['vc'] = 'VP9'
                             info['video_codec'] = 'VP9'
                         elif 'VP8' in codec_upper:
                             info['vc'] = 'VP8'
                             info['video_codec'] = 'VP8'
+                        elif 'VC-1' in codec_upper or 'VC1' in codec_upper or 'WMV3' in codec_upper:
+                            info['vc'] = 'VC1'
+                            info['video_codec'] = 'VC1'
+                        elif 'MPEG' in codec_upper:
+                            info['vc'] = 'MPEG'
+                            info['video_codec'] = 'MPEG'
                         else:
                             info['vc'] = codec
                             info['video_codec'] = codec
@@ -90,31 +95,41 @@ class MediaInfoExtractor:
             # Audio track
             for track in media_info.tracks:
                 if track.track_type == 'Audio':
-                    # Audio codec/format
-                    codec = track.codec_id or track.codec or track.format
-                    if codec:
-                        codec_upper = codec.upper()
-                        if 'DTS' in codec_upper:
-                            info['ac'] = 'DTS'
-                            info['audio_codec'] = 'DTS'
-                        elif 'AC3' in codec_upper or 'DOLBY' in codec_upper:
-                            info['ac'] = 'AC3'
-                            info['audio_codec'] = 'AC3'
+                    # Audio codec/format — use commercial_name for high-res variants,
+                    # codec_id / format for base type detection.
+                    codec      = track.codec_id or track.codec or track.format or ""
+                    commercial = (getattr(track, 'commercial_name', None) or "").upper()
+                    codec_upper = codec.upper()
+                    if codec or commercial:
+                        # Highest specificity first
+                        if 'TRUEHD' in codec_upper or 'TRUE HD' in commercial or 'TRUEHD' in commercial:
+                            label = 'TrueHD'
+                        elif 'ATMOS' in commercial:
+                            label = 'Atmos'
+                        elif 'DTS-HD MA' in commercial or 'DTS-HD MASTER' in commercial or 'MA' in commercial and 'DTS' in codec_upper:
+                            label = 'DTS-MA'
+                        elif 'DTS-HD' in commercial or 'DTS-HD' in codec_upper or 'DTSHD' in codec_upper:
+                            label = 'DTS-HD'
+                        elif 'DTS' in codec_upper:
+                            label = 'DTS'
+                        elif 'EAC3' in codec_upper or 'E-AC' in codec_upper or 'E-AC-3' in commercial or 'EAC3' in commercial:
+                            label = 'EAC3'
+                        elif 'AC3' in codec_upper or 'AC-3' in commercial or ('DOLBY' in commercial and 'PLUS' not in commercial):
+                            label = 'AC3'
                         elif 'AAC' in codec_upper:
-                            info['ac'] = 'AAC'
-                            info['audio_codec'] = 'AAC'
-                        elif 'MP3' in codec_upper:
-                            info['ac'] = 'MP3'
-                            info['audio_codec'] = 'MP3'
+                            label = 'AAC'
+                        elif 'MP3' in codec_upper or 'MPEG AUDIO' in commercial:
+                            label = 'MP3'
                         elif 'FLAC' in codec_upper:
-                            info['ac'] = 'FLAC'
-                            info['audio_codec'] = 'FLAC'
+                            label = 'FLAC'
                         elif 'OPUS' in codec_upper:
-                            info['ac'] = 'OPUS'
-                            info['audio_codec'] = 'OPUS'
+                            label = 'OPUS'
+                        elif 'PCM' in codec_upper or 'LPCM' in codec_upper:
+                            label = 'LPCM'
                         else:
-                            info['ac'] = codec
-                            info['audio_codec'] = codec
+                            label = codec
+                        info['ac'] = label
+                        info['audio_codec'] = label
                     
                     # Audio channels — pymediainfo may return int or str; normalise first
                     if track.channel_s:
