@@ -100,6 +100,22 @@ class RenameHistory:
         self._save_history()
         return operation
 
+    def revert_undo(self):
+        """Restore index after a failed undo (file missing / move failed).
+
+        Call this instead of directly incrementing current_index so that
+        the lock is held and the history file is updated consistently.
+        """
+        with self._lock:
+            self.current_index = min(self.current_index + 1, len(self.history) - 1)
+        self._save_history()
+
+    def revert_redo(self):
+        """Restore index after a failed redo (source file missing / move failed)."""
+        with self._lock:
+            self.current_index = max(self.current_index - 1, -1)
+        self._save_history()
+
     def get_last_operations(self, count: int = 10) -> List[Dict]:
         """Get last N operations"""
         with self._lock:

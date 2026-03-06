@@ -48,7 +48,12 @@ def load_settings() -> dict:
 
 def save_settings(data: dict):
     SETTINGS_PATH.parent.mkdir(parents=True, exist_ok=True)
-    SETTINGS_PATH.write_text(json.dumps(data, indent=2))
+    # Write with owner-only permissions (0o600) so API keys are not world-readable.
+    # Use os.open to set mode atomically on creation; on existing files chmod after.
+    text = json.dumps(data, indent=2)
+    fd = os.open(str(SETTINGS_PATH), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as f:
+        f.write(text)
 
 _s = load_settings()
 for _env, _key in [
@@ -1188,12 +1193,15 @@ class DuplicateFinderDialog(QDialog):
         if not directory or not os.path.isdir(directory):
             QMessageBox.warning(self, "No Directory", "Please choose a valid directory first.")
             return
+        if self._worker is not None and self._worker.isRunning():
+            return  # Scan already in progress — ignore the second click
         mode = "exact" if self._mode_combo.currentIndex() == 0 else "probable"
         self._status_lbl.setText("Scanning… please wait.")
         self._table.setRowCount(0)
         self._worker = DuplicateScanWorker(directory, mode)
         self._worker.result.connect(self._on_result)
         self._worker.status.connect(lambda s: self._status_lbl.setText(s))
+        self._worker.finished.connect(self._worker.deleteLater)
         self._worker.start()
 
     def _on_result(self, groups, total):
@@ -1581,6 +1589,8 @@ class SonarrRadarrDialog(QDialog):
     # ── Fetch ─────────────────────────────────────────────────────
 
     def _fetch(self):
+        if hasattr(self, '_worker') and self._worker is not None and self._worker.isRunning():
+            return  # Fetch already in progress
         self._tree.clear(); self._results = []
         self._dl_all_btn.setEnabled(False); self._dl_sel_btn.setEnabled(False)
         self._status_lbl.setText("Fetching…")
@@ -1591,6 +1601,7 @@ class SonarrRadarrDialog(QDialog):
         self._worker.result_ready.connect(self._on_results)
         self._worker.status.connect(self._status_lbl.setText)
         self._worker.error.connect(lambda e: self._status_lbl.setText(f"⚠ {e}"))
+        self._worker.finished.connect(self._worker.deleteLater)
         self._worker.start()
 
     def _on_results(self, results):
@@ -1675,6 +1686,8 @@ class SonarrRadarrDialog(QDialog):
         self._trigger_downloads(self._results)
 
     def _trigger_downloads(self, items):
+        if hasattr(self, '_dl_worker') and self._dl_worker is not None and self._dl_worker.isRunning():
+            return  # Download trigger already in progress
         self._progress.setVisible(True); self._progress.setValue(0)
         self._dl_all_btn.setEnabled(False); self._dl_sel_btn.setEnabled(False)
         self._status_lbl.setText(f"Sending {len(items)} search request(s)…")
@@ -1690,6 +1703,7 @@ class SonarrRadarrDialog(QDialog):
         )
         self._dl_worker.status.connect(self._status_lbl.setText)
         self._dl_worker.done.connect(self._on_downloads_done)
+        self._dl_worker.finished.connect(self._dl_worker.deleteLater)
         self._dl_worker.start()
 
     def _on_downloads_done(self, sent):
@@ -1999,6 +2013,8 @@ class MissingEpisodesDialog(QDialog):
     # ── TMDB scan ─────────────────────────────────────────────────────────────
 
     def _scan(self):
+        if hasattr(self, '_worker') and self._worker is not None and self._worker.isRunning():
+            return  # TMDB scan already in progress
         self._tree.clear()
         self._results = []
         self._send_all_btn.setEnabled(False)
@@ -2012,6 +2028,7 @@ class MissingEpisodesDialog(QDialog):
         self._worker = MissingEpisodesWorker(self.matches, key, base)
         self._worker.result_ready.connect(self._on_results)
         self._worker.error.connect(lambda e: self._status.setText(f"Error: {e}"))
+        self._worker.finished.connect(self._worker.deleteLater)
         self._worker.start()
 
     def _on_results(self, results):
@@ -2108,6 +2125,8 @@ class MissingEpisodesDialog(QDialog):
 
     def _dispatch_sonarr(self, results, sonarr_url, sonarr_key):
         """Use MissingSonarrWorker to send season-pack search commands to Sonarr."""
+        if hasattr(self, '_sonarr_worker') and self._sonarr_worker is not None and self._sonarr_worker.isRunning():
+            return  # Already dispatching
         self._progress.setVisible(True)
         self._progress.setValue(0)
         self._send_all_btn.setEnabled(False)
@@ -2119,6 +2138,7 @@ class MissingEpisodesDialog(QDialog):
         )
         self._sonarr_worker.status.connect(self._status.setText)
         self._sonarr_worker.done.connect(self._on_sonarr_done)
+        self._sonarr_worker.finished.connect(self._sonarr_worker.deleteLater)
         self._sonarr_worker.start()
 
     def _on_sonarr_done(self, sent):
@@ -2282,6 +2302,8 @@ class SortIQApp(QMainWindow):
         # Worker references — always initialize so hasattr checks aren't needed
         self.match_worker = None
         self._scan_worker = None
+        # Sources for which the "uses TMDB backend" warning has already been shown
+        self._warned_sources: set = set()
         # Batch undo tracking — set to None until first rename batch runs
         self._batch_start_op_idx = None
         # Map of {source_path: dest_path} populated by _on_op_complete for "Show in folder"
@@ -2876,8 +2898,10 @@ class SortIQApp(QMainWindow):
         dlg.exec()
 
     def _on_source_changed(self, source: str):
-        """Show an info message when user picks TVDB or AniDB (both use TMDB backend)."""
-        if source in ("TheTVDB", "AniDB"):
+        """Show an info message when user picks TVDB or AniDB (both use TMDB backend).
+        Only shown once per source per session to avoid repeated interruptions."""
+        if source in ("TheTVDB", "AniDB") and source not in self._warned_sources:
+            self._warned_sources.add(source)
             QMessageBox.information(
                 self,
                 f"{source} — Note",
@@ -3009,7 +3033,7 @@ class SortIQApp(QMainWindow):
     def _on_match_hard_error(self, error_msg):
         self.progress_bar.setVisible(False)
         self.match_btn.setEnabled(True)
-        if hasattr(self, 'match_worker'):
+        if self.match_worker is not None:
             self.match_worker.stop()  # Signal the loop to exit at next iteration
         if "401" in error_msg or "Unauthorized" in error_msg or "invalid" in error_msg.lower():
             reply = QMessageBox.critical(self,"Invalid API Key",
@@ -3120,8 +3144,8 @@ class SortIQApp(QMainWindow):
             has_tv     = any(m and m.get("type") == "tv"    for m in self.matches if m)
             has_movie  = any(m and m.get("type") == "movie" for m in self.matches if m)
             arr_targets = []
-            if has_tv    and sonarr_url: arr_targets.append(("Sonarr", sonarr_url, settings.get("sonarr_api_key", "")))
-            if has_movie and radarr_url: arr_targets.append(("Radarr", radarr_url, settings.get("radarr_api_key", "")))
+            if has_tv    and sonarr_url: arr_targets.append(("Sonarr", sonarr_url, settings.get("sonarr_key", "")))
+            if has_movie and radarr_url: arr_targets.append(("Radarr", radarr_url, settings.get("radarr_key", "")))
             if arr_targets:
                 names = " & ".join(t[0] for t in arr_targets)
                 reply = QMessageBox.question(self, "Refresh Library?",
@@ -3158,8 +3182,7 @@ class SortIQApp(QMainWindow):
         src, dst = op['new_path'], op['original_path']
         if not os.path.exists(src):
             # File was already moved or is missing — revert index so undo stays consistent
-            self.history.current_index += 1
-            self.history._save_history()
+            self.history.revert_undo()
             QMessageBox.warning(self, "Undo Failed", f"File not found:\n{src}")
             return
         try:
@@ -3167,8 +3190,7 @@ class SortIQApp(QMainWindow):
             self._log(f"\u21a9  Undone: {os.path.basename(src)}")
         except Exception as e:
             # Revert index — operation did not complete
-            self.history.current_index += 1
-            self.history._save_history()
+            self.history.revert_undo()
             QMessageBox.critical(self, "Error", f"Undo failed: {e}")
         self._update_undo_redo()
 
@@ -3178,8 +3200,7 @@ class SortIQApp(QMainWindow):
         src, dst = op['original_path'], op['new_path']
         if not os.path.exists(src):
             # Revert index — source is gone
-            self.history.current_index -= 1
-            self.history._save_history()
+            self.history.revert_redo()
             QMessageBox.warning(self, "Redo Failed", f"Source no longer exists:\n{src}")
             return
         try:
@@ -3188,8 +3209,7 @@ class SortIQApp(QMainWindow):
             self._log(f"\u21aa  Redone: {os.path.basename(dst)}")
         except Exception as e:
             # Revert index — operation did not complete
-            self.history.current_index -= 1
-            self.history._save_history()
+            self.history.revert_redo()
             QMessageBox.critical(self, "Error", f"Redo failed: {e}")
         self._update_undo_redo()
 
@@ -3207,16 +3227,14 @@ class SortIQApp(QMainWindow):
                 break
             src, dst = op['new_path'], op['original_path']
             if not os.path.exists(src):
-                self.history.current_index += 1
-                self.history._save_history()
+                self.history.revert_undo()
                 failed += 1
                 continue
             try:
                 shutil.move(src, dst)
                 self._log(f"\u21a9  Batch undo: {os.path.basename(src)}")
             except Exception as e:
-                self.history.current_index += 1
-                self.history._save_history()
+                self.history.revert_undo()
                 self._log(f"\u26a0  Batch undo failed: {os.path.basename(src)} — {e}")
                 failed += 1
         self._update_undo_redo()

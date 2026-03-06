@@ -240,7 +240,7 @@ Full docs: [API.md](API.md)
 | Missing episode detection | ✅ | ❌ | ❌ | ✅ |
 | Sonarr / Radarr / Prowlarr | ✅ | ❌ | ❌ | ❌ |
 | NFO sidecar files | ✅ | ❌ | ✅ | ❌ |
-| Embed metadata (MP4) | ✅ | ✅ | ✅ | ❌ |
+| Embed metadata (MP4/MKV) | ✅ | ✅ | ✅ | ❌ |
 | Scene name cleaning | ✅ | ✅ | ❌ | ❌ |
 | Rename conflict detection | ✅ | ❌ | ❌ | ❌ |
 | REST API | ✅ | ❌ | ❌ | ❌ |
