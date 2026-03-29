@@ -22,6 +22,8 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, RedirectResponse
 
+from .auth import ApiKeyMiddleware
+
 # ── Bootstrap: inject saved API keys before any core module is imported ────────
 _settings_path = Path.home() / ".sortiq" / "settings.json"
 if _settings_path.exists():
@@ -70,13 +72,32 @@ app = FastAPI(
     redoc_url    = "/redoc",
 )
 
-# Allow all origins for local/Docker use — tighten in production
+# ── CORS ──────────────────────────────────────────────────────────────────────
+# Read allowed origins from SORTIQ_CORS_ORIGINS (comma-separated).
+# Defaults to localhost + Docker defaults when unset.
+_default_origins = [
+    "http://localhost:6080",
+    "http://localhost:8060",
+    "http://127.0.0.1:6080",
+    "http://127.0.0.1:8060",
+]
+_cors_env = os.environ.get("SORTIQ_CORS_ORIGINS", "").strip()
+_allowed_origins = (
+    [o.strip() for o in _cors_env.split(",") if o.strip()]
+    if _cors_env
+    else _default_origins
+)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_allowed_origins,
     allow_methods=["*"],
-    allow_headers=["*"],
+    allow_headers=["*", "X-Api-Key"],
 )
+
+# ── Authentication ────────────────────────────────────────────────────────────
+# When SORTIQ_API_KEY is set (env or settings.json), all API endpoints
+# require the key in an X-Api-Key or Authorization header.
+app.add_middleware(ApiKeyMiddleware)
 
 # ── Routers ────────────────────────────────────────────────────────────────────
 
@@ -156,4 +177,7 @@ def naming_tokens():
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
     logging.exception("Unhandled exception in %s", request.url)
-    return JSONResponse(status_code=500, content={"detail": str(exc)})
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "Internal server error. Check the server logs for details."},
+    )

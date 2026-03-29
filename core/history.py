@@ -3,11 +3,14 @@ Rename history manager - tracks rename operations for undo/redo
 """
 
 import json
+import logging
 import os
 import threading
 from pathlib import Path
 from typing import List, Dict, Optional
 from datetime import datetime
+
+log = logging.getLogger(__name__)
 
 
 class RenameHistory:
@@ -40,12 +43,12 @@ class RenameHistory:
                 self.current_index = -1
     
     def _save_history(self):
-        """Save history to file"""
+        """Save history to file. Must be called while self._lock is held."""
         try:
             with open(self.history_file, 'w') as f:
                 json.dump(self.history, f, indent=2)
         except Exception as e:
-            print(f"Error saving history: {e}")
+            log.error("Error saving history: %s", e)
     
     def add_operation(self, original_path: str, new_path: str, match_info: Dict = None):
         """Add a rename operation to history"""
@@ -68,7 +71,7 @@ class RenameHistory:
                 self.history = self.history[-100:]
                 self.current_index = len(self.history) - 1
 
-        self._save_history()
+            self._save_history()
 
     def can_undo(self) -> bool:
         """Check if undo is possible"""
@@ -87,7 +90,7 @@ class RenameHistory:
                 return None
             operation = self.history[self.current_index]
             self.current_index -= 1
-        self._save_history()
+            self._save_history()
         return operation
 
     def redo(self) -> Optional[Dict]:
@@ -97,7 +100,7 @@ class RenameHistory:
                 return None
             self.current_index += 1
             operation = self.history[self.current_index]
-        self._save_history()
+            self._save_history()
         return operation
 
     def revert_undo(self):
@@ -108,13 +111,13 @@ class RenameHistory:
         """
         with self._lock:
             self.current_index = min(self.current_index + 1, len(self.history) - 1)
-        self._save_history()
+            self._save_history()
 
     def revert_redo(self):
         """Restore index after a failed redo (source file missing / move failed)."""
         with self._lock:
             self.current_index = max(self.current_index - 1, -1)
-        self._save_history()
+            self._save_history()
 
     def get_last_operations(self, count: int = 10) -> List[Dict]:
         """Get last N operations"""

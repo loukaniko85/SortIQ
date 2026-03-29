@@ -155,6 +155,14 @@ class SubtitleFetcher:
                 continue
             try:
                 return self._do_download(file_id, file_path)
+            except RuntimeError as exc:
+                last_error = str(exc)
+                # Stop immediately on quota exhaustion — all further attempts will fail
+                if "quota" in str(exc).lower() or "406" in str(exc):
+                    log.warning("Download quota reached, stopping attempts: %s", exc)
+                    break
+                log.warning("Download attempt failed (file_id=%s): %s", file_id, exc)
+                continue
             except Exception as exc:
                 last_error = str(exc)
                 log.warning("Download attempt failed (file_id=%s): %s", file_id, exc)

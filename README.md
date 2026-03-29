@@ -39,7 +39,7 @@ a **browser GUI** via Docker + noVNC (perfect for NAS/servers), and exposes a fu
 | Linux | AppImage — no install needed | [Releases](../../releases) |
 | Windows | Portable ZIP — unzip, run .exe | [Releases](../../releases) |
 | macOS | Universal DMG — native on Apple Silicon + Intel | [Releases](../../releases) |
-| Docker | noVNC browser GUI + REST API | `ghcr.io/loukaniko85/sortiq:latest` |
+| Docker | noVNC browser GUI + REST API | `ghcr.io/loukaniko/sortiq:latest` |
 
 ---
 

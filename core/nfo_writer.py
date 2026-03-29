@@ -7,10 +7,13 @@ TV NFO:    <tvshow>   — placed in the show root folder
            <episodedetails> — placed alongside each episode file
 """
 
+import logging
 import os
 import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Dict, List, Optional
+
+log = logging.getLogger(__name__)
 
 
 def _iter_names(mi: Dict, *keys) -> List[str]:
@@ -91,7 +94,7 @@ class NFOWriter:
                 f.write(xml_str)
             return nfo_path
         except Exception as e:
-            print(f"NFO write error: {e}")
+            log.error("NFO write error: %s", e)
             return None
 
     def write_tvshow(self, show_dir: str, match_info: Dict) -> Optional[str]:
@@ -107,7 +110,7 @@ class NFOWriter:
                 f.write(xml_str)
             return nfo_path
         except Exception as e:
-            print(f"tvshow.nfo write error: {e}")
+            log.error("tvshow.nfo write error: %s", e)
             return None
 
     # ── XML builders ──────────────────────────────────────────────────────────

@@ -11,6 +11,7 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 
 from ..models import JobRequest, JobSummary, JobDetail, JobStatus
+from ..security import validate_paths, validate_path, validate_webhook_url
 from ..jobs import queue
 
 router = APIRouter(prefix="/jobs", tags=["Batch Jobs"])
@@ -31,6 +32,10 @@ def create_job(req: JobRequest):
     The `files` field accepts individual file paths **or** directory paths —
     directories are expanded recursively to all media files inside them.
     """
+    validate_paths(req.files, label="file")
+    if req.output_dir:
+        validate_path(req.output_dir, label="output_dir")
+    validate_webhook_url(req.webhook_url)
     job = queue.submit(req)
     return job.to_summary()
 

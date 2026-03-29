@@ -151,8 +151,9 @@ class JobQueue:
         from core.artwork import ArtworkDownloader
         from core.metadata_writer import MetadataWriter
 
-        job.status     = JobStatus.RUNNING
-        job.started_at = _utcnow()
+        with job._lock:
+            job.status     = JobStatus.RUNNING
+            job.started_at = _utcnow()
 
         try:
             matcher    = MediaMatcher()
@@ -161,16 +162,18 @@ class JobQueue:
             meta_wr    = MetadataWriter()    if job.request.write_metadata   else None
 
             files = _expand_paths(job.request.files)
-            job.progress = JobProgress(current=0, total=len(files), percent=0.0)
+            with job._lock:
+                job.progress = JobProgress(current=0, total=len(files), percent=0.0)
             job._log(f"Starting — {len(files)} file(s)")
 
             for i, fp in enumerate(files):
                 if job._cancelled:
                     break
 
-                job.progress.current      = i + 1
-                job.progress.percent      = round((i + 1) / max(len(files), 1) * 100, 1)
-                job.progress.current_file = os.path.basename(fp)
+                with job._lock:
+                    job.progress.current      = i + 1
+                    job.progress.percent      = round((i + 1) / max(len(files), 1) * 100, 1)
+                    job.progress.current_file = os.path.basename(fp)
 
                 try:
                     # FIX: pass data_source.value (string) not the enum object
@@ -185,7 +188,8 @@ class JobQueue:
                             original=fp, success=False,
                             dry_run=job.request.dry_run, error="No match found",
                         ))
-                        job.error_count += 1
+                        with job._lock:
+                            job.error_count += 1
                         continue
 
                     new_name  = renamer.generate_new_name(fp, mi, job.request.naming_scheme)
@@ -199,7 +203,8 @@ class JobQueue:
                             original=fp, destination=str(dest),
                             success=False, dry_run=job.request.dry_run, conflict=True,
                         ))
-                        job.conflict_count += 1
+                        with job._lock:
+                            job.conflict_count += 1
                         continue
 
                     if not job.request.dry_run:
@@ -221,7 +226,8 @@ class JobQueue:
 
                     mode = "DRY-RUN" if job.request.dry_run else job.request.operation.value.upper()
                     job._log(f"✓  [{mode}] {os.path.basename(fp)} → {dest.name}")
-                    job.renamed_count += 1
+                    with job._lock:
+                        job.renamed_count += 1
                     job.results.append(RenameResult(
                         original    = fp,
                         destination = str(dest),
@@ -236,11 +242,13 @@ class JobQueue:
                         original=fp, success=False,
                         dry_run=job.request.dry_run, error=str(exc),
                     ))
-                    job.error_count += 1
+                    with job._lock:
+                        job.error_count += 1
 
-            job.progress.current = len(files)
-            job.progress.percent = 100.0
-            job.status = JobStatus.CANCELLED if job._cancelled else JobStatus.COMPLETED
+            with job._lock:
+                job.progress.current = len(files)
+                job.progress.percent = 100.0
+                job.status = JobStatus.CANCELLED if job._cancelled else JobStatus.COMPLETED
             job._log(
                 f"Done — {job.renamed_count} renamed, "
                 f"{job.error_count} errors, {job.conflict_count} conflicts"

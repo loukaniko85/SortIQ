@@ -4,9 +4,12 @@ Includes built-in presets for Plex, Kodi, Jellyfin, FileBot style, and Anime.
 """
 
 import json
+import logging
 import os
 from pathlib import Path
 from typing import Dict, List
+
+log = logging.getLogger(__name__)
 
 
 # Ordered built-ins — these are always present; user presets are merged on top
@@ -86,11 +89,12 @@ class PresetManager:
                 # Strip out any old built-ins that were previously saved as user presets
                 self._user_presets = {k: v for k, v in data.items()
                                       if k not in _BUILTIN_PRESETS}
-            except Exception:
+            except Exception as e:
+                log.warning("Failed to load presets from %s: %s", self.presets_file, e)
                 self._user_presets = {}
 
     def _save(self):
         try:
             Path(self.presets_file).write_text(json.dumps(self._user_presets, indent=2))
         except Exception as e:
-            print(f"Error saving presets: {e}")
+            log.error("Error saving presets: %s", e)

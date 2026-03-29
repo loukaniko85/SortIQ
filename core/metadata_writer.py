@@ -9,12 +9,15 @@ MKV:     mkvpropedit CLI (mkvtoolnix package) — graceful fallback if not insta
          Windows:       bundled with MKVToolNix installer
 """
 
+import logging
 import os
 import shutil
 import subprocess
 import tempfile
 from pathlib import Path
 from typing import Dict, List, Optional
+
+log = logging.getLogger(__name__)
 
 try:
     from mutagen.mp4 import MP4, MP4Cover
@@ -110,11 +113,11 @@ class MetadataWriter:
         self.available         = MUTAGEN_AVAILABLE or self.mkv_available
 
         if not MUTAGEN_AVAILABLE:
-            print("Info: mutagen not installed — MP4/M4V metadata writing disabled. "
-                  "Install with: pip install mutagen")
+            log.info("mutagen not installed — MP4/M4V metadata writing disabled. "
+                     "Install with: pip install mutagen")
         if not _MKVPROPEDIT:
-            print("Info: mkvpropedit not found — MKV metadata writing disabled. "
-                  "Install mkvtoolnix (dnf/apt/brew install mkvtoolnix).")
+            log.info("mkvpropedit not found — MKV metadata writing disabled. "
+                     "Install mkvtoolnix (dnf/apt/brew install mkvtoolnix).")
 
     def write_metadata(self, file_path: str, match_info: Dict,
                        poster_path: Optional[str] = None) -> bool:
@@ -138,7 +141,7 @@ class MetadataWriter:
             else:
                 return False
         except Exception as e:
-            print(f"Error writing metadata to {file_path}: {e}")
+            log.error("Error writing metadata to %s: %s", file_path, e)
             return False
 
     def _write_mp4_metadata(self, file_path: str, match_info: Dict,
@@ -180,14 +183,16 @@ class MetadataWriter:
                 try:
                     with open(poster_path, "rb") as f:
                         cover_data = f.read()
-                    video["covr"] = [MP4Cover(cover_data, imageformat=MP4Cover.FORMAT_JPEG)]
+                    p_ext = Path(poster_path).suffix.lower()
+                    img_fmt = MP4Cover.FORMAT_PNG if p_ext == ".png" else MP4Cover.FORMAT_JPEG
+                    video["covr"] = [MP4Cover(cover_data, imageformat=img_fmt)]
                 except Exception as e:
-                    print(f"Warning: could not embed cover art: {e}")
+                    log.warning("Could not embed cover art: %s", e)
 
             video.save()
             return True
         except Exception as e:
-            print(f"Error writing MP4 metadata: {e}")
+            log.error("Error writing MP4 metadata: %s", e)
             return False
 
     def _write_mkv_metadata(self, file_path: str, match_info: Dict,
@@ -199,7 +204,7 @@ class MetadataWriter:
         the poster image as embedded cover art.
         """
         if not _MKVPROPEDIT:
-            print("mkvpropedit not found — install mkvtoolnix to enable MKV metadata writing.")
+            log.warning("mkvpropedit not found — install mkvtoolnix to enable MKV metadata writing.")
             return False
 
         title = match_info.get("title") or ""
@@ -250,15 +255,15 @@ class MetadataWriter:
                 timeout=30,
             )
             if result.returncode != 0:
-                print(f"mkvpropedit error: {result.stderr.strip()}")
+                log.error("mkvpropedit error: %s", result.stderr.strip())
                 return False
             return True
 
         except subprocess.TimeoutExpired:
-            print(f"mkvpropedit timed out for {file_path}")
+            log.error("mkvpropedit timed out for %s", file_path)
             return False
         except Exception as e:
-            print(f"Error writing MKV metadata: {e}")
+            log.error("Error writing MKV metadata: %s", e)
             return False
         finally:
             if tags_file:

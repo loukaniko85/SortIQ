@@ -6,6 +6,7 @@ from __future__ import annotations
 from typing import List
 from fastapi import APIRouter, HTTPException
 from ..models import WatcherCreateRequest, WatcherInfo, WatcherStatus
+from ..security import validate_path
 from ..watcher import watcher_manager
 
 router = APIRouter(prefix="/watchers", tags=["Watch Folders"])
@@ -26,9 +27,9 @@ def create_watcher(req: WatcherCreateRequest):
     Set `auto_start=false` to create in paused state and start manually with
     `POST /watchers/{id}/start`.
     """
-    from pathlib import Path
-    if not Path(req.directory).is_dir():
-        raise HTTPException(404, f"Directory not found: {req.directory}")
+    validate_path(req.directory, must_exist=True, label="directory")
+    if req.output_dir:
+        validate_path(req.output_dir, label="output_dir")
     wf = watcher_manager.create(req)
     return wf.to_info()
 

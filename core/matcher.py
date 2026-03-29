@@ -501,7 +501,8 @@ class MediaMatcher:
 
     def _match_tvdb(self, info: Dict) -> Optional[Dict]:
         """TheTVDB v4 requires subscriber PIN auth; fall back to TMDB for now."""
-        log.info("TheTVDB not fully implemented — falling back to TheMovieDB.")
+        log.warning("TheTVDB not fully implemented — using TheMovieDB as fallback. "
+                    "Results may differ from TheTVDB.")
         return self._match_tmdb(info)
 
     # ── Low-level HTTP ─────────────────────────────────────────────────────────
@@ -533,7 +534,12 @@ class MediaMatcher:
                 f"TMDB returned HTTP {resp.status_code} for {url!r}: {resp.text[:200]}"
             )
 
-        return resp.json()
+        try:
+            return resp.json()
+        except ValueError as exc:
+            raise RuntimeError(
+                f"Invalid JSON in TMDB response for {url!r}: {resp.text[:200]}"
+            ) from exc
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────────

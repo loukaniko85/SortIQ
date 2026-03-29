@@ -2,8 +2,11 @@
 Media information extractor - extracts technical details from video files using MediaInfo
 """
 
+import logging
 import os
 from typing import Dict, Optional
+
+log = logging.getLogger(__name__)
 
 try:
     from pymediainfo import MediaInfo
@@ -18,8 +21,8 @@ class MediaInfoExtractor:
     def __init__(self):
         self.available = MEDIAINFO_AVAILABLE
         if not self.available:
-            print("Warning: pymediainfo not installed. Media info extraction disabled.")
-            print("Install with: pip install pymediainfo")
+            log.warning("pymediainfo not installed. Media info extraction disabled. "
+                        "Install with: pip install pymediainfo")
     
     def extract_info(self, file_path: str) -> Dict[str, str]:
         """Extract media information from file"""
@@ -163,5 +166,5 @@ class MediaInfoExtractor:
             return info
             
         except Exception as e:
-            print(f"Error extracting media info: {e}")
+            log.error("Error extracting media info: %s", e)
             return {}

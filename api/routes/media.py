@@ -12,6 +12,7 @@ from typing import List
 
 from fastapi import APIRouter, HTTPException
 
+from ..security import validate_path, validate_paths
 from ..models import (
     MatchRequest, MatchResponse, FileMatchResult, MatchInfo,
     RenameRequest, RenameResponse, RenameResult,
@@ -51,9 +52,7 @@ def _match_info_from_dict(mi: dict) -> MatchInfo:
 @router.post("/scan", response_model=ScanResponse, summary="Scan directory for media files")
 def scan_directory(req: ScanRequest):
     """Recursively scan a directory and return all matching media files."""
-    d = Path(req.directory)
-    if not d.exists():
-        raise HTTPException(404, f"Directory not found: {req.directory}")
+    d = validate_path(req.directory, must_exist=True, label="directory")
     exts = {
         e.lower() if e.startswith(".") else f".{e.lower()}"
         for e in req.extensions
@@ -74,9 +73,7 @@ def library_stats(req: ScanRequest):
     Return counts and sizes for all media files in a directory, broken down
     by extension and resolution (resolution requires MediaInfo to be installed).
     """
-    d = Path(req.directory)
-    if not d.exists():
-        raise HTTPException(404, f"Directory not found: {req.directory}")
+    d = validate_path(req.directory, must_exist=True, label="directory")
 
     exts = {
         e.lower() if e.startswith(".") else f".{e.lower()}"
@@ -186,6 +183,7 @@ def match_files(req: MatchRequest):
     renamer = _get_renamer(req.naming_scheme)
     results: List[FileMatchResult] = []
 
+    validate_paths(req.files, label="file")
     for fp in req.files:
         if not Path(fp).exists():
             results.append(FileMatchResult(file=fp, matched=False,
@@ -231,6 +229,9 @@ def rename_files(req: RenameRequest):
     renamer = _get_renamer(req.naming_scheme)
     results: List[RenameResult] = []
     renamed = skipped = conflicts = 0
+    validate_paths(req.files, label="file")
+    if req.output_dir:
+        validate_path(req.output_dir, label="output_dir")
 
     for fp in req.files:
         p = Path(fp)
@@ -302,9 +303,9 @@ def auto_rename(req: AutoRenameRequest):
     For large directories use **POST /jobs** with a directory path instead,
     which runs asynchronously and doesn't block the HTTP connection.
     """
-    d = Path(req.directory)
-    if not d.exists():
-        raise HTTPException(404, f"Directory not found: {req.directory}")
+    d = validate_path(req.directory, must_exist=True, label="directory")
+    if req.output_dir:
+        validate_path(req.output_dir, label="output_dir")
 
     exts = {
         e.lower() if e.startswith(".") else f".{e.lower()}"
@@ -351,6 +352,7 @@ def generate_checksums(req: ChecksumRequest):
     alg = req.algorithm.value
     results: List[ChecksumResult] = []
 
+    validate_paths(req.files, label="file")
     for fp in req.files:
         p = Path(fp)
         if not p.exists():

@@ -44,6 +44,7 @@ class FileRenamer:
         episode  = match_info.get("episode")
 
         if season and episodes and len(episodes) > 1:
+            episodes = sorted(episodes)
             s_str      = f"S{int(season):02d}"
             ep_range   = f"E{int(episodes[0]):02d}-E{int(episodes[-1]):02d}"
             s00e00_str = s_str + ep_range
@@ -56,8 +57,13 @@ class FileRenamer:
             s_str = e_str = s00e00_str = ""
 
         # ── Safe title (strip filesystem-illegal chars) ────────────────────────
+        _UNSAFE = r'[<>:"/\\|?*\x00-\x1f]'
         raw_title = match_info.get("title") or "Unknown"
-        safe_title = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "", raw_title).strip()
+        safe_title = re.sub(_UNSAFE, "", raw_title).strip()
+
+        # Sanitise episode_title the same way to prevent path traversal
+        raw_ep_title = match_info.get("episode_title") or ""
+        safe_ep_title = re.sub(_UNSAFE, "", raw_ep_title).strip()
 
         # ── Token map ─────────────────────────────────────────────────────────
         # {af} = audio FORMAT  (codec name:  AAC, DTS, AC3 …) — FileBot convention
@@ -69,7 +75,7 @@ class FileRenamer:
             "{s}":          s_str.lstrip("S") if s_str else "",   # bare number e.g. "01"
             "{e}":          e_str,
             "{s00e00}":     s00e00_str,
-            "{t}":          match_info.get("episode_title") or "",
+            "{t}":          safe_ep_title,
             # Technical — short (FileBot) aliases
             "{vf}":         match_info.get("resolution")   or match_info.get("vf", ""),
             "{vc}":         match_info.get("video_codec")  or match_info.get("vc", ""),
