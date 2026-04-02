@@ -292,6 +292,8 @@ CI builds run automatically on every push to `main`. All three platform artifact
 
 Built by **loukaniko** with a little help from his LLM.
 
+**Contributors:** loukaniko, opencode
+
 Powered by [TheMovieDB](https://www.themoviedb.org/) · [TheTVDB](https://thetvdb.com/) · [FanArt.tv](https://fanart.tv/) · [OpenSubtitles](https://www.opensubtitles.com/) · [FastAPI](https://fastapi.tiangolo.com/) · [PyQt6](https://www.riverbankcomputing.com/software/pyqt/) · [noVNC](https://novnc.com/)
 
 MIT License
