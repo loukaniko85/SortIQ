@@ -167,10 +167,13 @@ def redo_rename():
 
 @history_router.delete("", status_code=204, summary="Clear all rename history")
 def clear_history():
-    """Permanently delete the entire rename history file."""
-    from core.history import RenameHistory
-    h = RenameHistory()
+    """Permanently delete the entire rename history file and reset in-memory state."""
+    h = _hist()
     try:
         Path(h.history_file).unlink(missing_ok=True)
+        # Reset in-memory state so GET /history reflects the cleared state
+        with h._lock:
+            h.history.clear()
+            h.current_index = -1
     except Exception as exc:
         raise HTTPException(500, f"Could not clear history: {exc}")

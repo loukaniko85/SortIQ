@@ -64,6 +64,7 @@ def validate_paths(paths: List[str], *, label: str = "file") -> List[Path]:
 # ── Webhook URL validation ───────────────────────────────────────────────────
 
 _BLOCKED_NETS = [
+    ipaddress.ip_network("0.0.0.0/8"),
     ipaddress.ip_network("127.0.0.0/8"),
     ipaddress.ip_network("10.0.0.0/8"),
     ipaddress.ip_network("172.16.0.0/12"),

@@ -18,7 +18,7 @@ import json
 import logging
 from pathlib import Path
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, RedirectResponse
 
@@ -176,6 +176,8 @@ def naming_tokens():
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
+    if isinstance(exc, HTTPException):
+        raise exc
     logging.exception("Unhandled exception in %s", request.url)
     return JSONResponse(
         status_code=500,

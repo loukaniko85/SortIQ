@@ -180,8 +180,15 @@ class WatchFolder:
         log.info("Watcher %s submitted job %s for %d file(s)",
                  self.watcher_id[:8], job.job_id[:8], len(new_files))
 
-        # Count renamed files once the job completes (non-blocking — just track)
-        self.files_renamed += len(new_files)   # approximate; real count in job results
+        # Track actual renamed count by polling job completion in a helper thread
+        def _track_renamed():
+            import time
+            while job.status.value in ("pending", "running"):
+                time.sleep(1)
+            self.files_renamed += job.renamed_count
+
+        threading.Thread(target=_track_renamed, daemon=True,
+                         name=f"watcher-track-{job.job_id[:8]}").start()
 
 
 class WatcherManager:

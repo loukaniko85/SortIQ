@@ -43,10 +43,12 @@ class RenameHistory:
                 self.current_index = -1
     
     def _save_history(self):
-        """Save history to file. Must be called while self._lock is held."""
+        """Save history to file atomically. Must be called while self._lock is held."""
         try:
-            with open(self.history_file, 'w') as f:
+            tmp_path = self.history_file + ".tmp"
+            with open(tmp_path, 'w') as f:
                 json.dump(self.history, f, indent=2)
+            os.replace(tmp_path, self.history_file)
         except Exception as e:
             log.error("Error saving history: %s", e)
     

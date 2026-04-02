@@ -227,6 +227,19 @@ def rename_files(req: RenameRequest):
     t0 = time.monotonic()
     matcher = _get_matcher()
     renamer = _get_renamer(req.naming_scheme)
+
+    if req.download_artwork:
+        from core.artwork import ArtworkDownloader
+        artwork_dl = ArtworkDownloader()
+    else:
+        artwork_dl = None
+
+    if req.write_metadata:
+        from core.metadata_writer import MetadataWriter
+        meta_wr = MetadataWriter()
+    else:
+        meta_wr = None
+
     results: List[RenameResult] = []
     renamed = skipped = conflicts = 0
     validate_paths(req.files, label="file")
@@ -265,6 +278,17 @@ def rename_files(req: RenameRequest):
                     shutil.copy2(fp, str(dest))
                 else:
                     shutil.move(fp, str(dest))
+
+                if artwork_dl:
+                    try:
+                        artwork_dl.download_poster(mi, str(dest.parent))
+                    except Exception:
+                        pass
+                if meta_wr:
+                    try:
+                        meta_wr.write_metadata(str(dest), mi)
+                    except Exception:
+                        pass
 
             results.append(RenameResult(
                 original    = fp,

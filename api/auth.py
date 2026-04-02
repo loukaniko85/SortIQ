@@ -44,7 +44,7 @@ def _read_api_key() -> str:
 
 
 def _extract_token(request: Request) -> Optional[str]:
-    """Extract the API key from the request (header or query param)."""
+    """Extract the API key from the request headers."""
     # X-Api-Key header (preferred)
     key = request.headers.get("X-Api-Key")
     if key:
@@ -54,11 +54,6 @@ def _extract_token(request: Request) -> Optional[str]:
     auth = request.headers.get("Authorization", "")
     if auth.lower().startswith("bearer "):
         return auth[7:].strip()
-
-    # ?api_key= query param (convenience for browser testing)
-    key = request.query_params.get("api_key")
-    if key:
-        return key.strip()
 
     return None
 

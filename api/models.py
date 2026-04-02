@@ -53,7 +53,7 @@ class MatchRequest(BaseModel):
 
 class MatchInfo(BaseModel):
     title:          Optional[str]       = None
-    year:           Optional[str]       = None
+    year:           Optional[int]       = None
     type:           Optional[str]       = None
     tmdb_id:        Optional[int]       = None
     season:         Optional[int]       = None
@@ -199,7 +199,7 @@ class SearchRequest(BaseModel):
 
 class SearchResult(BaseModel):
     title:          str
-    year:           Optional[str]       = None
+    year:           Optional[int]       = None
     type:           str
     tmdb_id:        Optional[int]       = None
     overview:       Optional[str]       = None

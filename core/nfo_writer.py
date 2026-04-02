@@ -11,12 +11,12 @@ import logging
 import os
 import xml.etree.ElementTree as ET
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Iterator
 
 log = logging.getLogger(__name__)
 
 
-def _iter_names(mi: Dict, *keys) -> List[str]:
+def _iter_names(mi: Dict, *keys) -> Iterator[str]:
     """Yield string names from a field that may be list[dict], list[str], or comma str.
 
     TMDB returns genres as [{"id":1,"name":"Action"}, ...] and production_companies
@@ -26,16 +26,20 @@ def _iter_names(mi: Dict, *keys) -> List[str]:
     for key in keys:
         val = mi.get(key)
         if val is not None:
+            found = False
             if isinstance(val, list):
                 for item in val:
                     name = item.get("name", "") if isinstance(item, dict) else str(item)
                     if name and name.strip():
                         yield name.strip()
+                        found = True
             elif isinstance(val, str):
                 for part in val.split(","):
                     if part.strip():
                         yield part.strip()
-            return  # use first key that has a value
+                        found = True
+            if found:
+                return  # use first key that actually yielded names
 
 
 def _indent(elem, level=0):
@@ -46,10 +50,12 @@ def _indent(elem, level=0):
             elem.text = pad + "  "
         if not elem.tail or not elem.tail.strip():
             elem.tail = pad
+        last_child = None
         for child in elem:
             _indent(child, level + 1)
-        if not child.tail or not child.tail.strip():
-            child.tail = pad
+            last_child = child
+        if last_child is not None and (not last_child.tail or not last_child.tail.strip()):
+            last_child.tail = pad
     else:
         if level and (not elem.tail or not elem.tail.strip()):
             elem.tail = pad

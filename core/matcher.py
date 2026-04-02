@@ -5,6 +5,7 @@ Media file matcher — matches files against TMDB / TheTVDB.
 import os
 import re
 import logging
+from collections import OrderedDict
 from pathlib import Path
 from typing import Dict, Optional, List
 
@@ -80,10 +81,18 @@ class MediaMatcher:
 
         self.media_info_extractor = MediaInfoExtractor() if MediaInfoExtractor else None
 
-        # Simple in-session TMDB result cache.
+        # Simple in-session TMDB result cache with bounded size.
         # Keys: ("movie", title, year), ("tv", title), ("episode", show_id, season, episode)
         # Avoids re-querying TMDB for each episode of the same show in a batch.
-        self._cache: dict = {}
+        # OrderedDict with maxsize=500 prevents unbounded memory growth.
+        self._cache: OrderedDict = OrderedDict()
+        self._cache_maxsize = 500
+
+    def _cache_set(self, key, value):
+        """Set a cache entry, evicting oldest entries when at capacity."""
+        self._cache[key] = value
+        while len(self._cache) > self._cache_maxsize:
+            self._cache.popitem(last=False)
 
     # ── Public API ─────────────────────────────────────────────────────────────
 
@@ -329,11 +338,11 @@ class MediaMatcher:
                     "genres":   (details or {}).get("genres", []),
                     "networks": (details or {}).get("networks", []),
                 }
-            self._cache[cache_key] = result
+            self._cache_set(cache_key, result)
             return result
         except Exception as exc:
             log.warning("search_by_imdb_id(%r): %s", imdb_id, exc)
-            self._cache[cache_key] = None
+            self._cache_set(cache_key, None)
             return None
 
     def _match_tmdb_movie(self, info: Dict) -> Optional[Dict]:
@@ -360,7 +369,7 @@ class MediaMatcher:
             results = data.get("results", [])
 
         if not results:
-            self._cache[cache_key] = None
+            self._cache_set(cache_key, None)
             return None
 
         movie    = results[0]
@@ -379,7 +388,7 @@ class MediaMatcher:
             "genres":               (details or {}).get("genres", []),
             "production_companies": (details or {}).get("production_companies", []),
         }
-        self._cache[cache_key] = result
+        self._cache_set(cache_key, result)
         return result
 
     def _get_tmdb_movie_details(self, movie_id: int) -> Optional[Dict]:
@@ -394,11 +403,11 @@ class MediaMatcher:
                 f"{self.tmdb_base_url}/movie/{movie_id}",
                 {"api_key": self.tmdb_api_key},
             )
-            self._cache[cache_key] = result
+            self._cache_set(cache_key, result)
             return result
         except Exception as exc:
             log.warning("Failed to fetch movie details for id=%s: %s", movie_id, exc)
-            self._cache[cache_key] = None
+            self._cache_set(cache_key, None)
             return None
 
     def _get_tmdb_show_details(self, show_id: int) -> Optional[Dict]:
@@ -413,11 +422,11 @@ class MediaMatcher:
                 f"{self.tmdb_base_url}/tv/{show_id}",
                 {"api_key": self.tmdb_api_key},
             )
-            self._cache[cache_key] = result
+            self._cache_set(cache_key, result)
             return result
         except Exception as exc:
             log.warning("Failed to fetch TV show details for id=%s: %s", show_id, exc)
-            self._cache[cache_key] = None
+            self._cache_set(cache_key, None)
             return None
 
     def _match_tmdb_tv(self, info: Dict) -> Optional[Dict]:
@@ -438,10 +447,10 @@ class MediaMatcher:
             )
             results = data.get("results", [])
             if not results:
-                self._cache[show_cache_key] = None
+                self._cache_set(show_cache_key, None)
                 return None
             show = results[0]
-            self._cache[show_cache_key] = show
+            self._cache_set(show_cache_key, show)
 
         show_id  = show.get("id")
         season   = info.get("season")
@@ -493,10 +502,10 @@ class MediaMatcher:
                 f"{self.tmdb_base_url}/tv/{show_id}/season/{season}/episode/{episode}",
                 {"api_key": self.tmdb_api_key},
             )
-            self._cache[cache_key] = result
+            self._cache_set(cache_key, result)
             return result
         except Exception:
-            self._cache[cache_key] = None
+            self._cache_set(cache_key, None)
             return None
 
     def _match_tvdb(self, info: Dict) -> Optional[Dict]:

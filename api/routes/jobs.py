@@ -5,7 +5,7 @@
 from __future__ import annotations
 import asyncio
 import json
-from typing import List
+from typing import List, Optional
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
@@ -42,7 +42,7 @@ def create_job(req: JobRequest):
 
 @router.get("", response_model=List[JobSummary], summary="List all jobs")
 def list_jobs(
-    status: str = None,
+    status: Optional[str] = None,
     limit:  int = 100,
 ):
     """
